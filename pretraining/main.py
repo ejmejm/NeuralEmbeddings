@@ -9,16 +9,19 @@ if __name__ == '__main__':
     meg_full_tensor = torch.from_numpy(meg_data.values)
 
     input_seq = meg_full_tensor[:1024, 0]
+    input_seq = input_seq.unsqueeze(0).unsqueeze(0).float()
     print('input_seq shape:', input_seq.shape)
 
     print('Model init')
     model = Wav2Vec(
         input_dim = 1024,
-        embed_reduc_factor = 2,
-        conv_width = 3,
-        n_layers = 6,
+        embedding_dim = 16,
+        embed_reduc_factor = 16,
+        conv_width = 32,
+        n_layers = 4,
         dropout = 0.5,
-        include_conv = True,
+        n_head = 1,
+        include_conv = False,
         include_transformer = True)
 
     print('Model forward')

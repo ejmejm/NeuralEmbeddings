@@ -1,0 +1,28 @@
+model:
+  max_input_seq_len: 1024
+  input_channels: 1
+  embedding_dim: 64
+
+  # Convolution layer parameters
+  conv:
+    enabled: True
+
+    filter_size: 3
+    stride: 2
+
+  # Single channel encoder parameters
+  single_channel_encoder:
+    enabled: True
+
+    n_layers: 6
+    dropout: 0.5
+    n_head: 8 # N heads for the attention
+
+  # Mixed channel encoder parameters
+  mixed_channel_encoder:
+    enabled: True
+
+    n_layers: 6
+
+training:
+  wip: 0
