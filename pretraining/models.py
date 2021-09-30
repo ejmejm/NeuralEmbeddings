@@ -1,4 +1,5 @@
 import math
+from typing import Optional
 
 import numpy as np
 import torch
@@ -79,7 +80,6 @@ class Wav2Vec(nn.Module):
         # Look at this: https://pytorch.org/docs/stable/_modules/torch/nn/modules/transformer.html#Transformer
         # And follow this tutorial: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
         if include_transformer:
-            print('Max embedding seq len:', self.embed_seq_len)
             transformer_layer = nn.TransformerEncoderLayer(
                 d_model = self.embedding_dim,
                 nhead = n_head,
@@ -91,24 +91,40 @@ class Wav2Vec(nn.Module):
                 
             # TODO: Try addinng a normalization layer as a param to the transformer
             self.encoder = nn.TransformerEncoder(transformer_layer, n_layers)
+
+    def get_device(self):
+        return next(self.parameters()).device
     
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, sm_mask: Optional[Tensor] = None) -> Tensor:
         """
         Forward pass through the model.
+
+        Args:
+            x: input tensor, shape [batch_size, seq_len, n_channels].
+            sm_mask: mask for sequence modeling where 1 = keep and 0 = mask,
+                shape [batch_size, seq_len].
+
+        Returns:
+            Tensor, shape [batch_size, seq_len, embedding_dim].
         """
         # TODO: Add positional embeddings (check word2vec 2.0 paper)
 
         # TODO: Scale input by 1/sqrt(embedding_dim)?
 
-        # TODO: Figure out how we want to do masking
+        # TODO: Figure out how we want to do masking for padded inputs
         # Check Multiheaded Attention for masking: https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html?highlight=multiheadattention#torch.nn.MultiheadAttention
-
+        
         if self.include_conv:
+            x = x.transpose(1, 2)
             x = self.conv(x)
-        x = x.transpose(1, 2)
+            x = x.transpose(1, 2)
         print('Post conv shape:', x.shape)
 
-        # S x B x E
+        # Apply the mask for masked sequence modeling if applicable
+        if sm_mask:
+            x *= sm_mask.unsqueeze(2)
+
+        # B x S x E
         if self.include_transformer:
             x = self.encoder(x) # Mask could go here
         return x
