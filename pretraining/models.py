@@ -119,11 +119,9 @@ class Wav2Vec(nn.Module):
             x = self.conv(x)
             x = x.transpose(1, 2)
 
-        pre_encoder_embeds = x
-
         # Apply the mask for masked sequence modeling if applicable
         if sm_mask is not None:
-            x *= sm_mask.unsqueeze(2)
+            x *= 1 - sm_mask.unsqueeze(2)
 
         # B x S x E
         if self.include_transformer:

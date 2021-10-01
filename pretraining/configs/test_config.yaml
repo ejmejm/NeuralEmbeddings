@@ -11,8 +11,8 @@ train_method: "MSM"
 # for the method being used
 msm_params:
   mask_prob: 0.15
-  mask_min_len: 1
-  mask_max_len: 8
+  min_mask_len: 1
+  max_mask_len: 8
   
 cpc_params:
   wip: True

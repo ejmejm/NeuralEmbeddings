@@ -6,7 +6,6 @@ from torch import optim, Tensor
 from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader
 
-from data_loading import load_data, prepare_meg_data
 from models import Wav2Vec
 
 def generate_mask(data: Tensor, msm_config: dict) -> Tensor:
@@ -17,9 +16,23 @@ def generate_mask(data: Tensor, msm_config: dict) -> Tensor:
         data_shape: The shape of the data.
         msm_config: The configuration for masked sequence modeling.
     """
-    # Generate a random mask for the data
-    # TODO: Make use of min and max length mask params
-    mask = torch.rand(data.shape[0], data.shape[1]) < msm_config['mask_prob']
+    # Generate initial mask
+    avg_mask_length = (msm_config['max_mask_len'] + msm_config['min_mask_len']) / 2
+    adjusted_mask_prob = msm_config['mask_prob'] / avg_mask_length
+    mask = torch.rand(data.shape[0], data.shape[1]) < adjusted_mask_prob
+    mask = mask.type(torch.float32)
+
+    # Expand masks to the correct sizes
+    for batch_idx in range(mask.shape[0]):
+        seq_idx = 0
+        while seq_idx < data.shape[1]:
+            if mask[batch_idx, seq_idx] == 1:
+                mask_len = np.random.randint(
+                    msm_config['min_mask_len'], msm_config['max_mask_len'] + 1)
+                mask[batch_idx, seq_idx:seq_idx + mask_len] = 1
+                seq_idx += mask_len
+            else:
+                seq_idx += 1
     mask = mask.to(data.device)
 
     return mask
@@ -53,7 +66,6 @@ def train_with_msm(
             target = model(data).detach()
             mask = generate_mask(target, msm_config)
             masked_output = model(data, sm_mask=mask)
-            # TODO: Double check this detaching of the target is correct
 
             # Train the model on the masked sequence
             # TODO: Add a mask for embedding padding
@@ -91,10 +103,11 @@ def validate(model: Wav2Vec, val_loader: DataLoader, config: dict):
             target = model(data).detach()
             mask = generate_mask(target, msm_config)
             masked_output = model(data, sm_mask=mask)
-            # TODO: Double check this detaching of the target is correct
 
             val_loss = mse_loss(masked_output, target, reduce=False)
             val_loss = val_loss.sum(dim=2).mean().item()
             val_losses.append(val_loss)
     val_loss = np.mean(val_losses)
     return val_loss
+
+print(generate_mask(torch.rand((2, 10, 6)), {'min_mask_len': 2, 'max_mask_len': 3, 'mask_prob': 0.15}))
