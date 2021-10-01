@@ -1,4 +1,48 @@
+### Training ###
+
+train_epochs: 5
+learning_rate: 0.001
+log_interval: 10
+device: "cuda"
+
+train_method: "MSM"
+
+# The method params only need to be defined
+# for the method being used
+msm_params:
+  mask_prob: 0.15
+  mask_min_len: 1
+  mask_max_len: 8
+  
+cpc_params:
+  wip: True
+
+swav_params:
+  wip: True
+
+
+### Data ###
+
+
+# Number of samples = unit size * batch size
+seq_unit_size: 1024 # How many sequential points are counted as
+                    # a single unit for indexing
+data_type: "MEG" # Valid values: [MEG, EEG]
+
+train_batch_size: 1
+val_batch_size: 1
+test_batch_size: 1
+
+val_split: 0.05 # Percentage of data used for validation
+test_split: 0.15 # Percentage of data used for testing
+
+
+### Model ###
+
+
 model:
+  save_path: "../models/test_model.pt"
+
   max_input_seq_len: 1024
   input_channels: 1
   embedding_dim: 16
@@ -21,17 +65,3 @@ model:
   # Mixed channel encoder parameters
   mixed_channel_encoder:
     enabled: True
-
-training:
-  # Number of samples = unit size * batch size
-  train_batch_size: 1
-  val_batch_size: 1
-  test_batch_size: 1
-
-  val_split: 0.05 # Percentage of data used for validation
-  test_split: 0.15 # Percentage of data used for testing
-
-data:
-  unit_size: 1024 # How many sequential points are counted as
-               # a single unit for indexing
-  data_type: "MEG" # Valid values: [MEG, EEG]

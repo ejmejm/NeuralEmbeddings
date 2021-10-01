@@ -5,6 +5,7 @@ import torch
 
 from data_loading import prepare_dataloaders, load_config
 from models import Wav2Vec
+from training import train_with_msm
 
 ### Create argparser for command line arguments ###
 
@@ -26,12 +27,10 @@ if __name__ == '__main__':
 
     # Load the config file
     config = load_config(config_path)
-    data_config = config['data']
-    train_config = config['training']
     model_config = config['model']
 
     # Prepare the data
-    dataloaders = prepare_dataloaders(data_config, train_config)
+    dataloaders = prepare_dataloaders(config)
     train_loader = dataloaders['train']
     val_loader = dataloaders['val']
     test_loader = dataloaders['test']
@@ -49,13 +48,14 @@ if __name__ == '__main__':
         n_head = encoder_config['n_head'],
         include_conv = conv_config['enabled'],
         include_transformer = encoder_config['enabled'])
+    model = model.to(config['device'])
 
-    # # Train the model
-    # train_with_msm(model, train_loader, val_loader, train_config)
+    # Train the model
+    train_with_msm(model, config, train_loader, val_loader)
 
-    # # Save the model
-    # save_path = os.path.join(base_dir, model_config['save_path'])
-    # torch.save(model.state_dict(), save_path)
+    # Save the model
+    save_path = os.path.join(base_dir, model_config['save_path'])
+    torch.save(model.state_dict(), save_path)
 
     # # Test the model
     # test_with_msm(model, test_loader, train_config)

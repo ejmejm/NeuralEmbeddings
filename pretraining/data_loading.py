@@ -24,7 +24,8 @@ class BatchTensorDataset(Dataset):
     def __getitem__(self, idx: int) -> Tensor:
         start_idx = idx * self.unit_size
         end_idx = start_idx + self.unit_size
-        return self.data[start_idx:end_idx]
+        # TODO: Stop grabbing just the first channel once full model is ready
+        return self.data[start_idx:end_idx, 0:1]
 
 
 def load_config(path: str) -> dict:
@@ -77,30 +78,29 @@ def prepare_eeg_data(raw_data: Raw) -> pd.DataFrame:
 def prepare_meg_data(raw_data: Raw) -> pd.DataFrame:
     return preprocess_data(raw_data, data_type='MEG')
 
-def prepare_dataloaders(data_config: dict, train_config: dict) \
+def prepare_dataloaders(config: dict) \
         -> dict[str, DataLoader]:
     """
     Prepares the dataloaders for the training, validation, and testing sets.
 
     Args:
         data_config: The configuration for the data.
-        train_config: The configuration for the training.
     
     Returns:
         A dictionary of dataloaders.
     """
     # Load and preprocess data
     raw_data = load_data()
-    filtered_data = preprocess_data(raw_data, data_config['data_type'])
+    filtered_data = preprocess_data(raw_data, config['data_type'])
 
     # Create a dataset with the data
     dataset = BatchTensorDataset(
         torch.from_numpy(filtered_data.values).float(),
-        unit_size = data_config['unit_size'])
+        unit_size = config['seq_unit_size'])
 
     # Split the dataset into train and validation
-    n_val_samples = int(train_config['val_split'] * len(dataset))
-    n_test_samples = int(train_config['test_split'] * len(dataset))
+    n_val_samples = int(config['val_split'] * len(dataset))
+    n_test_samples = int(config['test_split'] * len(dataset))
     n_train_samples = len(dataset) - n_val_samples - n_test_samples
 
     train_dataset, val_dataset, test_dataset = random_split(
@@ -110,15 +110,15 @@ def prepare_dataloaders(data_config: dict, train_config: dict) \
     dataloaders = {
         'train': DataLoader(
             train_dataset,
-            train_config['train_batch_size'],
+            config['train_batch_size'],
             shuffle = True),
         'val': DataLoader(
             val_dataset,
-            train_config['val_batch_size'],
+            config['val_batch_size'],
             shuffle = True),
         'test': DataLoader(
             test_dataset,
-            train_config['test_batch_size'],
+            config['test_batch_size'],
             shuffle = True)
     }
     

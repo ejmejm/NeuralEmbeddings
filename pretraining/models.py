@@ -118,10 +118,11 @@ class Wav2Vec(nn.Module):
             x = x.transpose(1, 2)
             x = self.conv(x)
             x = x.transpose(1, 2)
-        print('Post conv shape:', x.shape)
+
+        pre_encoder_embeds = x
 
         # Apply the mask for masked sequence modeling if applicable
-        if sm_mask:
+        if sm_mask is not None:
             x *= sm_mask.unsqueeze(2)
 
         # B x S x E
