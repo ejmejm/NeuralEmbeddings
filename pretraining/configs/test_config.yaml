@@ -21,9 +21,9 @@ train_method: "MSM"
 # The method params only need to be defined
 # for the method being used
 msm_params:
-  mask_prob: 0.15
-  min_mask_len: 1
-  max_mask_len: 8
+  mask_prob: 1
+  min_mask_len: 4
+  max_mask_len: 10
   
 cpc_params:
   wip: True
@@ -54,12 +54,16 @@ test_split: 0.15 # Percentage of data used for testing
 model:
   save_path: "../models/test_model.pt"
 
-  max_input_seq_len: 1024
+  max_primary_input_len: 1024
+  max_calibration_input_len: 1024
   input_channels: 1
   embedding_dim: 16
+  channel_combine_func: "mean" # Valid values: [mean, logsumexp]
+
+  ### Primary Model ###
 
   # Convolution layer parameters
-  conv:
+  primary_conv:
     enabled: True
 
     filter_size: 32
@@ -70,9 +74,30 @@ model:
     enabled: True
 
     n_layers: 2
-    dropout: 0.5
+    dropout: 0.4
     n_head: 2 # N heads for the attention
 
   # Mixed channel encoder parameters
   mixed_channel_encoder:
     enabled: True
+
+    n_layers: 2
+    dropout: 0.4
+    n_head: 2 # N heads for the attention
+
+  ### Calibration Model ###
+  
+  # Convolution layer parameters
+  calibration_conv:
+    enabled: True
+
+    filter_size: 64
+    stride: 32
+
+  # Single channel encoder parameters
+  calibration_encoder:
+    enabled: True
+
+    n_layers: 2
+    dropout: 0.4
+    n_head: 2 # N heads for the attention

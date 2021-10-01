@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from data_loading import prepare_dataloaders, load_config
-from models import Wav2Vec
+from models import NeuroSignalEncoder, Wav2Vec
 from training import train_with_msm
 
 ### Create argparser for command line arguments ###
@@ -37,10 +37,10 @@ if __name__ == '__main__':
     test_loader = dataloaders['test']
 
     # Create the model
-    conv_config = model_config['conv']
+    conv_config = model_config['primary_conv']
     encoder_config = model_config['single_channel_encoder']
     model = Wav2Vec(
-        input_dim = model_config['max_input_seq_len'],
+        input_dim = model_config['max_primary_input_len'],
         embedding_dim = model_config['embedding_dim'],
         embed_reduc_factor = conv_config['stride'],
         conv_width = conv_config['filter_size'],
@@ -49,6 +49,7 @@ if __name__ == '__main__':
         n_head = encoder_config['n_head'],
         include_conv = conv_config['enabled'],
         include_transformer = encoder_config['enabled'])
+    # model = NeuroSignalEncoder(model_config)
     model = model.to(config['device'])
 
     # Train the model

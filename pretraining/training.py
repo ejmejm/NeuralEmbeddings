@@ -13,12 +13,15 @@ def generate_mask(data: Tensor, msm_config: dict) -> Tensor:
     Generates a random mask for the data.
     
     Args:
-        data_shape: The shape of the data.
+        data: The data to generate the mask for, shape (batch_size, seq_len, embed_dim).
         msm_config: The configuration for masked sequence modeling.
+    
+    Returns:
+        The generated mask, shape (batch_size, seq_len, embed_dim).
     """
     # Generate initial mask
     avg_mask_length = (msm_config['max_mask_len'] + msm_config['min_mask_len']) / 2
-    adjusted_mask_prob = msm_config['mask_prob'] / avg_mask_length
+    adjusted_mask_prob = msm_config['mask_prob']
     mask = torch.rand(data.shape[0], data.shape[1]) < adjusted_mask_prob
     mask = mask.type(torch.float32)
 
@@ -69,7 +72,7 @@ def train_with_msm(
 
             # Train the model on the masked sequence
             # TODO: Add a mask for embedding padding
-            loss = mse_loss(masked_output, target, reduce=False)
+            loss = (target - masked_output) ** 2 # mse_loss(masked_output, target, reduce=False)
             loss = loss.sum(dim=2).mean()
 
             optimizer.zero_grad()
