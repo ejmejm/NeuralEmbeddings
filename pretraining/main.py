@@ -1,6 +1,7 @@
 import argparse
 import os
 
+import numpy as np
 import torch
 
 from data_loading import prepare_dataloaders, load_config
@@ -11,10 +12,6 @@ from training import train_with_msm
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', type=str, default='configs/test_config.yaml')
-
-### Constants ###
-
-MODEL_DIR = '../models'
 
 ### Main ###
 
@@ -28,6 +25,10 @@ if __name__ == '__main__':
     # Load the config file
     config = load_config(config_path)
     model_config = config['model']
+
+    # Set seeds
+    np.random.seed(config['seed'])
+    torch.manual_seed(config['seed'])
 
     # Prepare the data
     dataloaders = prepare_dataloaders(config)

@@ -6,22 +6,24 @@ import torch
 from torch import nn, Tensor
 
 # Source: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
+# TODO: Change to positional encoding used by wav2vec 2.0
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+    def __init__(self, embedding_dim: int, dropout: float = 0.1, max_len: int = 5000):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
-
+        
         position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        div_term = torch.exp(torch.arange(0, embedding_dim, 2) \
+            * (-math.log(10000.0) / embedding_dim))
+        pe = torch.zeros(1, max_len, embedding_dim)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
 
     def forward(self, x: Tensor) -> Tensor:
         """
         Args:
-            x: Tensor, shape [seq_len, batch_size, embedding_dim]
+            x: Tensor, shape [batch_size, seq_len, embedding_dim]
         """
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
@@ -77,6 +79,10 @@ class Wav2Vec(nn.Module):
             self.embed_seq_len = self.input_dim
             self.embedding_dim = self.input_channels
 
+        # Initialize the positional encoding layer
+        self.pos_enc = PositionalEncoding(
+            embedding_dim, 0.25 * dropout, self.embed_seq_len)
+
         # Look at this: https://pytorch.org/docs/stable/_modules/torch/nn/modules/transformer.html#Transformer
         # And follow this tutorial: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
         if include_transformer:
@@ -107,10 +113,6 @@ class Wav2Vec(nn.Module):
         Returns:
             Tensor, shape [batch_size, seq_len, embedding_dim].
         """
-        # TODO: Add positional embeddings (check word2vec 2.0 paper)
-
-        # TODO: Scale input by 1/sqrt(embedding_dim)?
-
         # TODO: Figure out how we want to do masking for padded inputs
         # Check Multiheaded Attention for masking: https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html?highlight=multiheadattention#torch.nn.MultiheadAttention
         
@@ -118,6 +120,10 @@ class Wav2Vec(nn.Module):
             x = x.transpose(1, 2)
             x = self.conv(x)
             x = x.transpose(1, 2)
+
+        # TODO: Double check positional encodings are working correctly
+        # Brief testing made it seem like they may be hindering performance
+        x = self.pos_enc(x)
 
         # Apply the mask for masked sequence modeling if applicable
         if sm_mask is not None:

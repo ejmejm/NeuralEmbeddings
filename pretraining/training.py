@@ -109,5 +109,3 @@ def validate(model: Wav2Vec, val_loader: DataLoader, config: dict):
             val_losses.append(val_loss)
     val_loss = np.mean(val_losses)
     return val_loss
-
-print(generate_mask(torch.rand((2, 10, 6)), {'min_mask_len': 2, 'max_mask_len': 3, 'mask_prob': 0.15}))

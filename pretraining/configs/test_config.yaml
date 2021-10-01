@@ -1,6 +1,17 @@
+#############################################
+###                                       ###
+###  NeuralEmbeddings Pretraining Config  ###
+###                                       ###
+#############################################
+
+
+seed: 0
+
+
 ### Training ###
 
-train_epochs: 5
+
+train_epochs: 20
 learning_rate: 0.001
 log_interval: 10
 device: "cuda"
