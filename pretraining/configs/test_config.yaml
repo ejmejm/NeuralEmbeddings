@@ -37,9 +37,9 @@ swav_params:
 data_type: "MEG" # Valid values: [MEG, EEG]
 
 # Number of samples = unit size * batch size
-seq_unit_size: 2048
+# seq_unit_size: 2048
 # The number of sequential points that are sampled for a single example
-primary_unit_size: 512 
+primary_unit_size: 512
 calibration_unit_size: 1024
 
 # Total sequential points per batch =

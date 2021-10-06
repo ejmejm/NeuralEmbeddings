@@ -52,9 +52,29 @@ if __name__ == '__main__':
     model = NeuroSignalEncoder(model_config)
     model = model.to(config['device'])
 
-    print(model.buffers)
-    print('DIFJIOSDFJI', model.token_one_hots['<pad>'].device)
-    print(model._get_token_embeddings(['<pad>', '<calib>']))
+    # TODO: REMINDER, I need to fix the maximum input size to work with the addition of tokens 
+    out = model(torch.ones((2, 512, 20), dtype=torch.float32, device=config['device']),
+        calibration_input = 2 * torch.ones((1, 1024, 20), dtype=torch.float32, device=config['device']))
+
+    print(out)
+    print(out.embeddings.shape)
+
+    # from models import PAD_TOKEN, CALIB_TOKEN
+    # print('DIFJIOSDFJI', model.__getattr__(f'{PAD_TOKEN}_idx'))
+    # print(model._token_to_idx(PAD_TOKEN).device)
+    # print(model.token_embeddings.weight.device)
+    # print(model._get_token_embeddings([PAD_TOKEN, CALIB_TOKEN]))
+
+    # print('----------------------')
+
+    # calib = torch.ones((5, 2, 16), dtype=torch.float32, device=config['device'])
+    # prim = 2 * torch.ones((2, 5, 1, 16), dtype=torch.float32, device=config['device'])
+    # print('prim only')
+    # print(model._format_embeddings(prim))
+    # print(model._format_embeddings(prim).shape)
+    # print('comb')
+    # print(model._format_embeddings(prim, calib))
+    # print(model._format_embeddings(prim, calib).shape)
 
     # Train the model
     # train_with_msm(model, config, train_loader, val_loader)

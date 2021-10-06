@@ -9,10 +9,10 @@ import torch.nn.functional as F
 
 
 # Tokens are used to mark important parts of input sequences
-PAD_TOKEN = '<pad>' # Padding after end of sequence
+PAD_TOKEN = '<pad>' # Padding after end of sequence (currently unused)
 PRIMARY_TOKEN = '<primary>' # Start of primary inputs
 CALIB_TOKEN = '<calib>' # Start of calibration inputs
-MASK_TOKEN = '<mask>' # Masks for masked sequence modeling
+MASK_TOKEN = '<mask>' # Masks for masked sequence modeling (currently unused)
 
 TOKEN_TO_IDX = {
     PAD_TOKEN: 0,
@@ -104,6 +104,8 @@ class Wav2Vec(nn.Module):
             conv_padding = (conv_width - 1) // 2
             conv_stride = embed_reduc_factor
 
+            # Length of embedding sequences, which is calculated based on
+            # the maximum input size of the model + the convolutional params
             self.embed_seq_len = int(np.floor((input_dim + 2 * conv_padding - (conv_width - 1) - 1) \
                 / conv_stride + 1))
 
@@ -121,8 +123,8 @@ class Wav2Vec(nn.Module):
         self.pos_enc = PositionalEncoding(
             embedding_dim, 0.25 * dropout, self.embed_seq_len)
 
-        # Look at this: https://pytorch.org/docs/stable/_modules/torch/nn/modules/transformer.html#Transformer
-        # And follow this tutorial: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
+        # Reference for understanding how this works:
+        # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
         if include_transformer:
             transformer_layer = nn.TransformerEncoderLayer(
                 d_model = self.embedding_dim,
@@ -241,18 +243,38 @@ class NeuroSignalEncoder(nn.Module):
             include_conv = conv_config['enabled'],
             include_transformer = encoder_config['enabled'])
 
-        # Weighting linear layer for calibration
-
-        self.token_to_idx = {token: torch.tensor(val, dtype=torch.long) for token, val in TOKEN_TO_IDX.items()}
-        # 
-
+        # Register index tensors as buffers
+        # This way, their devices will be updated with the model's device
+        for token, idx in TOKEN_TO_IDX.items():
+            idx_tensor = torch.tensor(idx, dtype=torch.long)
+            self.register_buffer(f'{token}_idx', idx_tensor)
+        
         # Create special tokens and special token embeddings layer
         self.token_embeddings = nn.Embedding(
             num_embeddings = len(TOKEN_TO_IDX),
             embedding_dim = config['embedding_dim'],
             padding_idx = 0)
 
-    def _format_embeddings(self, primary_embeds: Tensor,
+    def _token_to_idx(self, token: str) -> Tensor:
+        return self.__getattr__(f'{token}_idx')
+
+    def _get_token_embeddings(self, tokens: List[str]) -> List[Tensor]:
+        """
+        Get the embeddings for a list of tokens.
+
+        Args:
+            tokens: list of tokens
+
+        Returns:
+            List of embeddings, one for each token.
+        """
+        token_idxs = [self._token_to_idx(token) for token in tokens]
+        token_idxs = torch.stack(token_idxs, dim=0).unsqueeze(0)
+        return self.token_embeddings(token_idxs).squeeze(0)
+
+    def _format_embeddings(
+        self,
+        primary_embeds: Tensor,
         calib_embeds: Tensor = None) -> Tensor:
         """
         Format the embeddings for the model by combining primary
@@ -265,40 +287,62 @@ class NeuroSignalEncoder(nn.Module):
         Returns:
             Tensor, shape [batch_size, seq_len, embedding_dim].
         """
-        primary_tag_embeds = self.token_embeddings(
-            torch.tensor([TOKEN_TO_IDX[PRIMARY_TOKEN]], dtype=torch.long))
-        primary_embeds = torch.cat([primary_embeds, primary_tag_embeds], dim=2)
+        primary_tag_embeds, calib_tag_embeds = \
+            self._get_token_embeddings([PRIMARY_TOKEN, CALIB_TOKEN])
+
+        primary_tag_embeds = torch.vstack([primary_tag_embeds] * primary_embeds.shape[0])
+        primary_tag_embeds = primary_tag_embeds.unsqueeze(1)
+
+        embeds = torch.cat([primary_tag_embeds, primary_embeds], dim=1)
 
         if calib_embeds is not None:
-            calib_tag_embeds = self.token_embeddings(
-                torch.tensor([TOKEN_TO_IDX['calibration_tag']], dtype=torch.long))
-            calib_embeds = torch.cat([calib_embeds, calib_tag_embeds], dim=2)
+            calib_tag_embeds = calib_tag_embeds.unsqueeze(0)
+            calib_embeds = torch.cat([calib_tag_embeds, calib_embeds], dim=0)
+            calib_embeds = torch.stack([calib_embeds] * primary_embeds.shape[0], dim=0)
+            embeds = torch.cat([calib_embeds, embeds], dim=1)
 
-        return torch.cat([primary_embeds, calib_embeds], dim=1)
+        # Could add padding here if not done before passing inputs to the model
 
-        # Combine the primary and calibration embeddings
+        return embeds
+
+    def _format_embeddings(
+        self,
+        primary_embeds: Tensor,
+        calib_embeds: Tensor = None) -> Tensor:
+        """
+        Format the embeddings for the model by combining primary
+        and calibration inputs, and by addings appropriate tags.
+
+        Args:
+            primary_embeds: embeddings for the primary sequence,
+                shape [batch_size, n_channels, seq_len, embedding_dim].
+            calib_embeds: embeddings for the calibration sequence,
+                shape [n_channels, seq_len, embedding_dim].
+
+        Returns:
+            Tensor, shape [batch_size, seq_len, embedding_dim].
+        """
+        primary_tag_embeds, calib_tag_embeds = \
+            self._get_token_embeddings([PRIMARY_TOKEN, CALIB_TOKEN])
+
+        primary_tag_embeds = primary_tag_embeds.unsqueeze(0) # seq_len
+        primary_tag_embeds = torch.stack( # n_channels
+            [primary_tag_embeds] * primary_embeds.shape[1], dim=0)
+        primary_tag_embeds = torch.stack( # batch_size
+            [primary_tag_embeds] * primary_embeds.shape[0], dim=0)
+
+        embeds = torch.cat([primary_tag_embeds, primary_embeds], dim=2)
+
         if calib_embeds is not None:
-            embeds = torch.cat([primary_embeds, calib_embeds], dim=1)
-        else:
-            embeds = primary_embeds
+            calib_tag_embeds = calib_tag_embeds.unsqueeze(0) # seq_len
+            calib_tag_embeds = torch.stack( # n_channels
+                [calib_tag_embeds] * calib_embeds.shape[0], dim=0)
+            calib_embeds = torch.cat([calib_tag_embeds, calib_embeds], dim=1)
+            calib_embeds = torch.stack( # batch_size
+                [calib_embeds] * primary_embeds.shape[0], dim=0)
+            embeds = torch.cat([calib_embeds, embeds], dim=2)
 
-        # Add special tokens
-        embeds = torch.cat([
-            embeds,
-            self.token_embeddings(torch.tensor([TOKEN_TO_IDX['<PAD>']] * embeds.shape[0])).unsqueeze(1)
-        ], dim=1)
-
-        # Add tags
-        embeds = torch.cat([
-            embeds,
-            self.token_embeddings(torch.tensor([TOKEN_TO_IDX['<PRIMARY>']] * embeds.shape[0])).unsqueeze(1)
-        ], dim=1)
-
-        if calib_embeds is not None:
-            embeds = torch.cat([
-                embeds,
-                self.token_embeddings(torch.tensor([TOKEN_TO_IDX['<CALIBRATION>']] * embeds.shape[0])).unsqueeze(1)
-            ], dim=1)
+        # Could add padding here if not done before passing inputs to the model
 
         return embeds
 
@@ -336,19 +380,19 @@ class NeuroSignalEncoder(nn.Module):
                 calibration_input, sm_mask=None)['embeddings']
             # Note: calibration input and primary input batches are currently not aligned
             # All calibration batches are combined sequentially and prepended to all primary batches
-            calib_embeds = rearrange(calib_embeds, '(b c) s e -> 1 c (b s) e', c=n_channels)
-
-
-
+            calib_embeds = rearrange(calib_embeds, '(b c) s e -> c (b s) e', c=n_channels)
+            # Create hook to prepend calib embeds and add tags
+            format_hook = lambda x: self._format_embeddings(x, calib_embeds)
         else:
-            pass
-
-            
-        n_channels = primary_input.shape[2]
-        primary_input = rearrange(primary_input, 'b s c -> (b c) s 1')
-
+            # Create hook to add tags
+            format_hook = lambda x: self._format_embeddings(x)
+        
         # Format inputs and run through the model
-        sc_outputs = self.sc_encoder(primary_input, sc_sm_mask)
+        primary_input = rearrange(primary_input, 'b s c -> (b c) s 1')
+        sc_outputs = self.sc_encoder(
+            primary_input,
+            sm_mask = sc_sm_mask,
+            embed_hook = format_hook)
         sc_embeds = sc_outputs['embeddings']
         sc_targets = sc_outputs['targets']
         sc_embeds = rearrange(sc_embeds, '(b c) s e -> b c s e', c=n_channels)
