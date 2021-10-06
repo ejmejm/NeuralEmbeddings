@@ -1,10 +1,47 @@
 import math
-from typing import Optional
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 from einops import rearrange
 import torch
 from torch import nn, Tensor
+import torch.nn.functional as F
+
+
+# Tokens are used to mark important parts of input sequences
+PAD_TOKEN = '<pad>' # Padding after end of sequence
+PRIMARY_TOKEN = '<primary>' # Start of primary inputs
+CALIB_TOKEN = '<calib>' # Start of calibration inputs
+MASK_TOKEN = '<mask>' # Masks for masked sequence modeling
+
+TOKEN_TO_IDX = {
+    PAD_TOKEN: 0,
+    PRIMARY_TOKEN: 1,
+    CALIB_TOKEN: 2,
+    MASK_TOKEN: 3
+}
+
+def get_token_embeddings(tokens: List[str], embedding_dim: int, device: str) -> Tensor:
+    """
+    Returns the embedding for a token.
+
+    Args:
+        tokens: List of tokens.
+        embedding_dim: dimension of the embedding.
+        device: device to get embedding on.
+
+    Returns:
+        Tensor, shape (n_tokens, embedding_dim).
+    """
+    tokens = [token.lower() for token in tokens]
+    token_ids = []
+    for token in TOKEN_TO_IDX:
+        if token.lower() in tokens:
+            token_ids.append(TOKEN_TO_IDX[token.lower()])
+        else:
+            raise ValueError(f'List contains unknown token: {tokens}')
+
+    return F.one_hot(torch.tensor(token_ids, device=device), embedding_dim)
 
 # Source: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
 # TODO: Change to positional encoding used by wav2vec 2.0
@@ -102,7 +139,8 @@ class Wav2Vec(nn.Module):
     def get_device(self):
         return next(self.parameters()).device
     
-    def forward(self, x: Tensor, sm_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, sm_mask: Optional[Tensor] = None,
+        embed_hook: Callable[[Tensor], Tensor] = None) -> Tensor:
         """
         Forward pass through the model.
 
@@ -110,6 +148,8 @@ class Wav2Vec(nn.Module):
             x: input tensor, shape [batch_size, seq_len, n_channels].
             sm_mask: mask for sequence modeling where 1 = keep and 0 = mask,
                 shape [batch_size, seq_len].
+            embed_hook: function to apply to the embeddings before passing them
+                through the transformer. 
 
         Returns:
             Tensor, shape [batch_size, seq_len, embedding_dim].
@@ -122,7 +162,11 @@ class Wav2Vec(nn.Module):
             x = self.conv(x)
             x = x.transpose(1, 2)
 
+        if embed_hook is not None:
+            x = embed_hook(x)
+
         # B x S x E
+        targets = None
         if self.include_transformer:
             # TODO: Double check positional encodings are working correctly
             # Update: I think I fixed the issue, but I haven tested extensively yet
@@ -130,14 +174,16 @@ class Wav2Vec(nn.Module):
 
             # Apply the mask for masked sequence modeling if applicable
             if sm_mask is not None:
+                targets = x
                 x = x * (1 - sm_mask.unsqueeze(2))
-                # print(1 - sm_mask.unsqueeze(2)[0])
-                # print(x[0])
 
             x = self.encoder(x) # Mask could go here
             # print(x)
 
-        return x
+        return {
+            'embeddings': x,
+            'targets': targets
+        }
 
 def apply_channel_combine_func(func_str, data):
     if func_str == 'mean':
@@ -165,6 +211,7 @@ class NeuroSignalEncoder(nn.Module):
             n_head = encoder_config['n_head'],
             include_conv = conv_config['enabled'],
             include_transformer = encoder_config['enabled'])
+        self.embed_seq_len = self.sc_encoder.embed_seq_len
 
         # Initialize the mixed channel encoder
         encoder_config = config['mixed_channel_encoder']
@@ -195,11 +242,71 @@ class NeuroSignalEncoder(nn.Module):
             include_transformer = encoder_config['enabled'])
 
         # Weighting linear layer for calibration
-        
+
+        self.token_to_idx = {token: torch.tensor(val, dtype=torch.long) for token, val in TOKEN_TO_IDX.items()}
+        # 
+
+        # Create special tokens and special token embeddings layer
+        self.token_embeddings = nn.Embedding(
+            num_embeddings = len(TOKEN_TO_IDX),
+            embedding_dim = config['embedding_dim'],
+            padding_idx = 0)
+
+    def _format_embeddings(self, primary_embeds: Tensor,
+        calib_embeds: Tensor = None) -> Tensor:
+        """
+        Format the embeddings for the model by combining primary
+        and calibration inputs, and by addings appropriate tags.
+
+        Args:
+            primary_embeds: embeddings for the primary sequence, shape [batch_size, seq_len, embedding_dim].
+            calib_embeds: embeddings for the calibration sequence, shape [seq_len, embedding_dim].
+
+        Returns:
+            Tensor, shape [batch_size, seq_len, embedding_dim].
+        """
+        primary_tag_embeds = self.token_embeddings(
+            torch.tensor([TOKEN_TO_IDX[PRIMARY_TOKEN]], dtype=torch.long))
+        primary_embeds = torch.cat([primary_embeds, primary_tag_embeds], dim=2)
+
+        if calib_embeds is not None:
+            calib_tag_embeds = self.token_embeddings(
+                torch.tensor([TOKEN_TO_IDX['calibration_tag']], dtype=torch.long))
+            calib_embeds = torch.cat([calib_embeds, calib_tag_embeds], dim=2)
+
+        return torch.cat([primary_embeds, calib_embeds], dim=1)
+
+        # Combine the primary and calibration embeddings
+        if calib_embeds is not None:
+            embeds = torch.cat([primary_embeds, calib_embeds], dim=1)
+        else:
+            embeds = primary_embeds
+
+        # Add special tokens
+        embeds = torch.cat([
+            embeds,
+            self.token_embeddings(torch.tensor([TOKEN_TO_IDX['<PAD>']] * embeds.shape[0])).unsqueeze(1)
+        ], dim=1)
+
+        # Add tags
+        embeds = torch.cat([
+            embeds,
+            self.token_embeddings(torch.tensor([TOKEN_TO_IDX['<PRIMARY>']] * embeds.shape[0])).unsqueeze(1)
+        ], dim=1)
+
+        if calib_embeds is not None:
+            embeds = torch.cat([
+                embeds,
+                self.token_embeddings(torch.tensor([TOKEN_TO_IDX['<CALIBRATION>']] * embeds.shape[0])).unsqueeze(1)
+            ], dim=1)
+
+        return embeds
+
     def forward(
         self,
         primary_input: Tensor,
-        sm_mask: Optional[Tensor] = None,
+        sc_sm_mask: Optional[Tensor] = None,
+        mc_sm_mask: Optional[Tensor] = None,
         calibration_input: Optional[Tensor] = None) -> Tensor:
         """
         Generates emebeddings for the primary_input, using the calibration_input
@@ -207,26 +314,58 @@ class NeuroSignalEncoder(nn.Module):
 
         Args:
             primary_input: input tensor, shape [batch_size, seq_len, n_channels].
-            sm_mask: mask for sequence modeling where 1 = keep and 0 = mask,
-                shape [batch_size, seq_len].
+            sc_sm_mask: mask for single-channel sequence modeling
+                where 1 = keep and 0 = mask, shape [batch_size, seq_len].
+            mc_sm_mask: mask for multi-channel sequence modeling
+                where 1 = keep and 0 = mask, shape [batch_size, seq_len].
             calibration_input: input tensor for calibration,
                 shape [batch_size, seq_len, n_channels].
 
         Returns:
             Tensor, shape [batch_size, seq_len, embedding_dim].
         """
+        n_calib_channels = calibration_input.shape[2]
+        n_channels = primary_input.shape[2]
+        assert n_channels == n_calib_channels, \
+            f'Primary input channels ({n_channels}) must match calibration input channels ({n_calib_channels})'
+
+        # Format calibration inputs and run them through the calibration model
+        if calibration_input is not None:
+            calibration_input = rearrange(calibration_input, 'b s c -> (b c) s 1')
+            calib_embeds = self.calibration_model(
+                calibration_input, sm_mask=None)['embeddings']
+            # Note: calibration input and primary input batches are currently not aligned
+            # All calibration batches are combined sequentially and prepended to all primary batches
+            calib_embeds = rearrange(calib_embeds, '(b c) s e -> 1 c (b s) e', c=n_channels)
+
+
+
+        else:
+            pass
+
+            
         n_channels = primary_input.shape[2]
         primary_input = rearrange(primary_input, 'b s c -> (b c) s 1')
-        primary_embeds = self.sc_encoder(primary_input, sm_mask)
-        primary_embeds = rearrange(primary_embeds, '(b c) s e -> b c s e', c=n_channels)
+
+        # Format inputs and run through the model
+        sc_outputs = self.sc_encoder(primary_input, sc_sm_mask)
+        sc_embeds = sc_outputs['embeddings']
+        sc_targets = sc_outputs['targets']
+        sc_embeds = rearrange(sc_embeds, '(b c) s e -> b c s e', c=n_channels)
 
         # Combine channels into a mixed channel
-        mixed_embeds = apply_channel_combine_func(
-            self.config['channel_combine_func'], primary_embeds)
-        if self.config['single_channel_encoder']['enabled']:
-            output_embeds = self.mc_encoder(mixed_embeds)
-        else:
-            output_embeds = self.mc_encoder(mixed_embeds, sm_mask)
+        mc_embeds = apply_channel_combine_func(
+            self.config['channel_combine_func'], sc_embeds)
 
-        return output_embeds
+        mc_outputs = self.mc_encoder(mc_embeds, mc_sm_mask)
+        output_embeds = mc_outputs['embeddings']
+        mc_targets = mc_outputs['targets']
+
+        return {
+            'embeddings': output_embeds,
+            'mc_embeddings': output_embeds,
+            'mc_targets': mc_targets,
+            'sc_embeddings': sc_embeds,
+            'sc_targets': sc_targets
+        }
 

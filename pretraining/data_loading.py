@@ -14,18 +14,32 @@ class BatchTensorDataset(Dataset):
     """
     Dataset that groups a dataset of Tensors into batches.
     """
-    def __init__(self, data: Tensor, unit_size: int):
+    def __init__(self, data: Tensor, config: dict):
+        """
+        Args:
+            data: Tensor of shape (n_samples, n_channels)
+            config: Dictionary of configuration parameters
+        """
         self.data = data
-        self.unit_size = unit_size
+        self.batch_size = config['batch_size']
+        self.primary_unit_size = config['primary_unit_size']
+        self.calib_unit_size = config['calibration_unit_size']
+        self.total_unit_size = self.batch_size * self.primary_unit_size \
+            + self.calib_unit_size
 
     def __len__(self):
-        return self.data.shape[0] // self.unit_size
+        return self.data.shape[0] // self.total_unit_size
 
     def __getitem__(self, idx: int) -> Tensor:
-        start_idx = idx * self.unit_size
-        end_idx = start_idx + self.unit_size
+        start_idx = idx * self.total_unit_size
+        end_idx = start_idx + self.total_unit_size
         # TODO: Stop grabbing just the first channel once full model is ready
-        return self.data[start_idx:end_idx, 0:1]
+        data = self.data[start_idx:end_idx]
+        return {
+            'calibration_input': data[:self.calib_unit_size].unsqueeze(0),
+            'primary_input': data[self.calib_unit_size:].view(
+                self.batch_size, self.primary_unit_size, data.shape[1])
+        }
 
 
 def load_config(path: str) -> dict:
@@ -84,7 +98,7 @@ def prepare_dataloaders(config: dict) \
     Prepares the dataloaders for the training, validation, and testing sets.
 
     Args:
-        data_config: The configuration for the data.
+        config: The configuration for the data.
     
     Returns:
         A dictionary of dataloaders.
@@ -95,8 +109,7 @@ def prepare_dataloaders(config: dict) \
 
     # Create a dataset with the data
     dataset = BatchTensorDataset(
-        torch.from_numpy(filtered_data.values).float(),
-        unit_size = config['seq_unit_size'])
+        torch.from_numpy(filtered_data.values).float(), config)
 
     # Split the dataset into train and validation
     n_val_samples = int(config['val_split'] * len(dataset))
@@ -106,20 +119,28 @@ def prepare_dataloaders(config: dict) \
     train_dataset, val_dataset, test_dataset = random_split(
         dataset, [n_train_samples, n_val_samples, n_test_samples])
 
+    # Removes the first dimension input tensors, Otherwise they are
+    # always 1 because the dataloader batch size is always 1
+    collate_fn = lambda x: x[0]
     # Create a dataloader for each dataset
     dataloaders = {
         'train': DataLoader(
-            train_dataset,
-            config['train_batch_size'],
-            shuffle = True),
+            train_dataset, shuffle=True, collate_fn=collate_fn),
         'val': DataLoader(
-            val_dataset,
-            config['val_batch_size'],
-            shuffle = True),
+            val_dataset, shuffle=True, collate_fn=collate_fn),
         'test': DataLoader(
-            test_dataset,
-            config['test_batch_size'],
-            shuffle = True)
+            test_dataset, shuffle=True, collate_fn=collate_fn),
     }
     
     return dataloaders
+
+if __name__ == '__main__':
+    # Testing to make sure the data is loaded correctly
+    base_dir = os.path.dirname(__file__)
+    config_path = os.path.join(base_dir, 'configs/test_config.yaml')
+    config = load_config(config_path)
+    dataloaders = prepare_dataloaders(config)
+    sample = next(iter(dataloaders['train']))
+    print(sample)
+    print('primary shape:', sample['primary_input'].shape)
+    print('calibration shape:', sample['calibration_input'].shape)

@@ -11,7 +11,7 @@ seed: 0
 ### Training ###
 
 
-train_epochs: 20
+train_epochs: 50
 learning_rate: 0.001
 log_interval: 10
 device: "cuda"
@@ -21,9 +21,9 @@ train_method: "MSM"
 # The method params only need to be defined
 # for the method being used
 msm_params:
-  mask_prob: 1
-  min_mask_len: 4
-  max_mask_len: 10
+  mask_prob: 1.0
+  min_mask_len: 2
+  max_mask_len: 8
   
 cpc_params:
   wip: True
@@ -34,15 +34,18 @@ swav_params:
 
 ### Data ###
 
-
-# Number of samples = unit size * batch size
-seq_unit_size: 1024 # How many sequential points are counted as
-                    # a single unit for indexing
 data_type: "MEG" # Valid values: [MEG, EEG]
 
-train_batch_size: 1
-val_batch_size: 1
-test_batch_size: 1
+# Number of samples = unit size * batch size
+seq_unit_size: 2048
+# The number of sequential points that are sampled for a single example
+primary_unit_size: 512 
+calibration_unit_size: 1024
+
+# Total sequential points per batch =
+# batch_size * primary_unit_size + calibration_unit_size
+batch_size: 2
+
 
 val_split: 0.05 # Percentage of data used for validation
 test_split: 0.15 # Percentage of data used for testing

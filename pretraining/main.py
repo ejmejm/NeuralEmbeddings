@@ -39,25 +39,31 @@ if __name__ == '__main__':
     # Create the model
     conv_config = model_config['primary_conv']
     encoder_config = model_config['single_channel_encoder']
-    model = Wav2Vec(
-        input_dim = model_config['max_primary_input_len'],
-        embedding_dim = model_config['embedding_dim'],
-        embed_reduc_factor = conv_config['stride'],
-        conv_width = conv_config['filter_size'],
-        n_layers = encoder_config['n_layers'],
-        dropout = encoder_config['dropout'],
-        n_head = encoder_config['n_head'],
-        include_conv = conv_config['enabled'],
-        include_transformer = encoder_config['enabled'])
-    # model = NeuroSignalEncoder(model_config)
+    # model = Wav2Vec(
+    #     input_dim = model_config['max_primary_input_len'],
+    #     embedding_dim = model_config['embedding_dim'],
+    #     embed_reduc_factor = conv_config['stride'],
+    #     conv_width = conv_config['filter_size'],
+    #     n_layers = encoder_config['n_layers'],
+    #     dropout = encoder_config['dropout'],
+    #     n_head = encoder_config['n_head'],
+    #     include_conv = conv_config['enabled'],
+    #     include_transformer = encoder_config['enabled'])
+    model = NeuroSignalEncoder(model_config)
     model = model.to(config['device'])
 
+    print(model.buffers)
+    print('DIFJIOSDFJI', model.token_one_hots['<pad>'].device)
+    print(model._get_token_embeddings(['<pad>', '<calib>']))
+
     # Train the model
-    train_with_msm(model, config, train_loader, val_loader)
+    # train_with_msm(model, config, train_loader, val_loader)
 
     # Save the model
     save_path = os.path.join(base_dir, model_config['save_path'])
     torch.save(model.state_dict(), save_path)
+
+
 
     # # Test the model
     # test_with_msm(model, test_loader, train_config)
@@ -76,3 +82,26 @@ if __name__ == '__main__':
     # print('input shape:', test_input.shape)
     # output = model(test_input)
     # print('output shape:', output.shape)
+
+    ### Some extra code for testing MSM ###
+
+    # print('STARTING EXPERIMENT...')
+    # data = next(iter(test_loader))
+    # data = data.to(config['device'])
+    # mask = torch.zeros((1, 64))
+    # mask[0, 1:3] = 1
+    # mask = mask.to(config['device'])
+    # mask = mask.type(torch.long)
+
+    # output_dict = model(data, sm_mask=mask)
+
+    # full_embeddings = output_dict['embeddings']
+    # full_targets = output_dict['targets']
+
+    # test_embeddings = full_embeddings[0, 1:3].detach().cpu().numpy().reshape(-1)
+    # test_targets = full_targets[0, 1:3].detach().cpu().numpy().reshape(-1)
+
+    # for a, b in zip(test_embeddings, test_targets):
+    #     print(a, b)
+        
+    # print('MSE loss:', np.mean((test_embeddings - test_targets)**2))
