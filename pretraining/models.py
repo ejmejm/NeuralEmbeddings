@@ -63,7 +63,7 @@ class PositionalEncoding(nn.Module):
         Args:
             x: Tensor, shape [batch_size, seq_len, embedding_dim]
         """
-        x = x + self.pe[:, :x.size(0)]
+        x = x + self.pe[:, :x.size(1)]
         return self.dropout(x)
 
 class Wav2Vec(nn.Module):
@@ -200,11 +200,37 @@ class NeuroSignalEncoder(nn.Module):
         super().__init__()
         self.config = config
 
-        # Initialize the single channel encoder
+        # Initialize the calibration model
+        conv_config = config['calibration_conv']
+        encoder_config = config['calibration_encoder']
+        self.calibration_model = Wav2Vec(
+            input_dim = config['max_calibration_input_len'],
+            embedding_dim = config['embedding_dim'],
+            embed_reduc_factor = conv_config['stride'],
+            conv_width = conv_config['filter_size'],
+            n_layers = encoder_config['n_layers'],
+            dropout = encoder_config['dropout'],
+            n_head = encoder_config['n_head'],
+            include_conv = conv_config['enabled'],
+            include_transformer = encoder_config['enabled'])
+
         conv_config = config['primary_conv']
         encoder_config = config['single_channel_encoder']
+
+        # Calculate input dim to single channel encoder
+        # Need to increase it to account for the calibration input and tags
+        # TODO: Clean this up, it's a messy hack
+        calib_seq_len = self.calibration_model.embed_seq_len
+        # Maybe should use ceil here
+        adjusted_input_dim = int(calib_seq_len * conv_config['stride']) # Calib input
+        if config['calibration_encoder']['enabled']:
+            adjusted_input_dim += conv_config['stride'] # Calib tag
+        adjusted_input_dim += config['max_primary_input_len'] # Primary input
+        adjusted_input_dim += conv_config['stride'] # Primary tag
+        
+        # Initialize the single channel encoder
         self.sc_encoder = Wav2Vec(
-            input_dim = config['max_primary_input_len'],
+            input_dim = adjusted_input_dim,
             embedding_dim = config['embedding_dim'],
             embed_reduc_factor = conv_config['stride'],
             conv_width = conv_config['filter_size'],
@@ -227,20 +253,6 @@ class NeuroSignalEncoder(nn.Module):
             dropout = encoder_config['dropout'],
             n_head = encoder_config['n_head'],
             include_conv = False,
-            include_transformer = encoder_config['enabled'])
-
-        # Initialize the calibration model
-        conv_config = config['calibration_conv']
-        encoder_config = config['calibration_encoder']
-        self.calibration_model = Wav2Vec(
-            input_dim = config['max_calibration_input_len'],
-            embedding_dim = config['embedding_dim'],
-            embed_reduc_factor = conv_config['stride'],
-            conv_width = conv_config['filter_size'],
-            n_layers = encoder_config['n_layers'],
-            dropout = encoder_config['dropout'],
-            n_head = encoder_config['n_head'],
-            include_conv = conv_config['enabled'],
             include_transformer = encoder_config['enabled'])
 
         # Register index tensors as buffers
@@ -315,32 +327,36 @@ class NeuroSignalEncoder(nn.Module):
 
         Args:
             primary_embeds: embeddings for the primary sequence,
-                shape [batch_size, n_channels, seq_len, embedding_dim].
+                shape [batch_size * n_channels, seq_len, embedding_dim].
             calib_embeds: embeddings for the calibration sequence,
                 shape [n_channels, seq_len, embedding_dim].
 
         Returns:
-            Tensor, shape [batch_size, seq_len, embedding_dim].
+            Tensor, shape [batch_size * n_channels, seq_len, embedding_dim].
         """
         primary_tag_embeds, calib_tag_embeds = \
             self._get_token_embeddings([PRIMARY_TOKEN, CALIB_TOKEN])
 
         primary_tag_embeds = primary_tag_embeds.unsqueeze(0) # seq_len
-        primary_tag_embeds = torch.stack( # n_channels
-            [primary_tag_embeds] * primary_embeds.shape[1], dim=0)
-        primary_tag_embeds = torch.stack( # batch_size
+        primary_tag_embeds = torch.stack( # batch_size * n_channels
             [primary_tag_embeds] * primary_embeds.shape[0], dim=0)
 
-        embeds = torch.cat([primary_tag_embeds, primary_embeds], dim=2)
+        embeds = torch.cat([primary_tag_embeds, primary_embeds], dim=1)
 
         if calib_embeds is not None:
             calib_tag_embeds = calib_tag_embeds.unsqueeze(0) # seq_len
             calib_tag_embeds = torch.stack( # n_channels
                 [calib_tag_embeds] * calib_embeds.shape[0], dim=0)
             calib_embeds = torch.cat([calib_tag_embeds, calib_embeds], dim=1)
-            calib_embeds = torch.stack( # batch_size
-                [calib_embeds] * primary_embeds.shape[0], dim=0)
-            embeds = torch.cat([calib_embeds, embeds], dim=2)
+            batch_size = int(primary_embeds.shape[0] / calib_embeds.shape[0])
+            if batch_size != primary_embeds.shape[0] / calib_embeds.shape[0]:
+                raise ValueError(
+                    f'Primary embeddings first dimension, ({primary_embeds.shape[0]}) '
+                    f'should be a multiple of the calibration channel size, '
+                    f'({calib_embeds.shape[0]})')
+            calib_embeds = torch.cat( # batch_size
+                [calib_embeds] * batch_size, dim=0)
+            embeds = torch.cat([calib_embeds, embeds], dim=1)
 
         # Could add padding here if not done before passing inputs to the model
 
@@ -351,7 +367,7 @@ class NeuroSignalEncoder(nn.Module):
         primary_input: Tensor,
         sc_sm_mask: Optional[Tensor] = None,
         mc_sm_mask: Optional[Tensor] = None,
-        calibration_input: Optional[Tensor] = None) -> Tensor:
+        calibration_input: Optional[Tensor] = None) -> Dict[str, Tensor]:
         """
         Generates emebeddings for the primary_input, using the calibration_input
         to provide extra info about channels.
@@ -366,7 +382,7 @@ class NeuroSignalEncoder(nn.Module):
                 shape [batch_size, seq_len, n_channels].
 
         Returns:
-            Tensor, shape [batch_size, seq_len, embedding_dim].
+            Dict, contains embeddings and target values.
         """
         n_calib_channels = calibration_input.shape[2]
         n_channels = primary_input.shape[2]
@@ -376,8 +392,10 @@ class NeuroSignalEncoder(nn.Module):
         # Format calibration inputs and run them through the calibration model
         if calibration_input is not None:
             calibration_input = rearrange(calibration_input, 'b s c -> (b c) s 1')
-            calib_embeds = self.calibration_model(
-                calibration_input, sm_mask=None)['embeddings']
+            calib_outputs = self.calibration_model(
+                calibration_input, sm_mask=None)
+            calib_embeds = calib_outputs['embeddings']
+            calib_return_embeds = calib_embeds
             # Note: calibration input and primary input batches are currently not aligned
             # All calibration batches are combined sequentially and prepended to all primary batches
             calib_embeds = rearrange(calib_embeds, '(b c) s e -> c (b s) e', c=n_channels)
@@ -386,6 +404,7 @@ class NeuroSignalEncoder(nn.Module):
         else:
             # Create hook to add tags
             format_hook = lambda x: self._format_embeddings(x)
+            calib_return_embeds = None
         
         # Format inputs and run through the model
         primary_input = rearrange(primary_input, 'b s c -> (b c) s 1')
@@ -410,6 +429,7 @@ class NeuroSignalEncoder(nn.Module):
             'mc_embeddings': output_embeds,
             'mc_targets': mc_targets,
             'sc_embeddings': sc_embeds,
-            'sc_targets': sc_targets
+            'sc_targets': sc_targets,
+            'calib_embeddings': calib_return_embeds
         }
 

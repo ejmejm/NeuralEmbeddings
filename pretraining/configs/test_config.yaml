@@ -21,7 +21,7 @@ train_method: "MSM"
 # The method params only need to be defined
 # for the method being used
 msm_params:
-  mask_prob: 1.0
+  mask_prob: 0.15
   min_mask_len: 2
   max_mask_len: 8
   
@@ -57,9 +57,8 @@ test_split: 0.15 # Percentage of data used for testing
 model:
   save_path: "../models/test_model.pt"
 
-  max_primary_input_len: 1024
+  max_primary_input_len: 512
   max_calibration_input_len: 1024
-  input_channels: 1
   embedding_dim: 16
   channel_combine_func: "mean" # Valid values: [mean, logsumexp]
 

@@ -57,7 +57,7 @@ if __name__ == '__main__':
         calibration_input = 2 * torch.ones((1, 1024, 20), dtype=torch.float32, device=config['device']))
 
     print(out)
-    print(out.embeddings.shape)
+    print(out['embeddings'].shape)
 
     # from models import PAD_TOKEN, CALIB_TOKEN
     # print('DIFJIOSDFJI', model.__getattr__(f'{PAD_TOKEN}_idx'))
