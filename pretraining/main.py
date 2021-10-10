@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from data_loading import prepare_dataloaders, load_config
-from models import NeuroSignalEncoder, Wav2Vec
+from models import NeuroSignalEncoder
 from training import train_with_msm
 
 ### Create argparser for command line arguments ###
@@ -40,13 +40,20 @@ if __name__ == '__main__':
     model = NeuroSignalEncoder(model_config)
     model = model.to(config['device'])
 
-    out = model(torch.ones((2, 512, 20), dtype=torch.float32, device=config['device']),
-        calibration_input = 2 * torch.ones((1, 1024, 20), dtype=torch.float32, device=config['device']))
-    # print(out)
-    print(out['embeddings'].shape)
+    # out = model(
+    #     torch.ones((2, 512, 20), dtype=torch.float32, device=config['device']),
+
+    #     sc_sm_mask = torch.ones((2, 66), dtype=torch.long, device=config['device']),
+    #     mc_sm_mask = torch.ones((2, 66), dtype=torch.long, device=config['device']),
+    #     calib_sm_mask = torch.ones((1, 32), dtype=torch.long, device=config['device']),
+
+    #     calibration_input = 2 * torch.ones((1, 1024, 20), dtype=torch.float32, device=config['device']),
+    #     )
+    # print([k for k, v in out.items() if v is not None])
+    # print(out['embeddings'].shape)
 
     # Train the model
-    # train_with_msm(model, config, train_loader, val_loader)
+    train_with_msm(model, config, train_loader, val_loader)
 
     # # Save the model
     # save_path = os.path.join(base_dir, model_config['save_path'])

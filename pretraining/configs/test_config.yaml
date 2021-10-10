@@ -11,9 +11,9 @@ seed: 0
 ### Training ###
 
 
-train_epochs: 50
+train_epochs: 10
 learning_rate: 0.001
-log_interval: 10
+log_interval: 16
 device: "cuda"
 
 train_method: "MSM"

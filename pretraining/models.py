@@ -2,7 +2,7 @@ import math
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
-from einops import rearrange
+from einops import rearrange, repeat
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
@@ -172,12 +172,13 @@ class Wav2Vec(nn.Module):
         targets = None
         if self.include_transformer:
             # TODO: Double check positional encodings are working correctly
-            # Update: I think I fixed the issue, but I haven tested extensively yet
+            # Update: I think I fixed the issue, but I haven't tested extensively yet
             x = self.pos_enc(x)
 
             # Apply the mask for masked sequence modeling if applicable
             if sm_mask is not None:
                 targets = x
+                # TODO: Fix the issue where special tags can be masked
                 x = x * (1 - sm_mask.unsqueeze(2))
 
             x = self.encoder(x) # Mask could go here
@@ -222,8 +223,10 @@ class NeuroSignalEncoder(nn.Module):
                 feedforward_dim = calib_config['feedforward_dim'],
                 include_conv = True,
                 include_transformer = True)
+            self.calib_embed_seq_len = self.calibration_model.embed_seq_len
         else:
             self.calibration_model = None
+            self.calib_embed_seq_len = None
 
 
         # Calculate input dim to single channel encoder
@@ -431,11 +434,20 @@ class NeuroSignalEncoder(nn.Module):
         # Format calibration inputs and run them through the calibration model
         if calibration_input is not None:
             calibration_input = rearrange(calibration_input, 'b s c -> (b c) s 1')
+            if calib_sm_mask is not None:
+                # Expand the mask to fit the rearranged inputs
+                calib_sm_mask = repeat(calib_sm_mask, 'b s -> (b c) s', c=n_channels)
             calib_outputs = self.calibration_model(
                 calibration_input, sm_mask=calib_sm_mask)
             calib_embeds = calib_outputs['embeddings']
-            calib_return_embeds = calib_embeds
-            calib_targets = calib_outputs['targets']
+
+            # Return tensors rearranged to match original input shape order
+            # The rearranging makes training easier later
+            calib_return_embeds = rearrange(calib_embeds,
+                '(b c) s e -> b s c e', c=n_channels)
+            calib_targets = rearrange(calib_outputs['targets'],
+                '(b c) s e -> b s c e', c=n_channels)
+
             # Note: calibration input and primary input batches are currently not aligned
             # All calibration batches are combined sequentially and prepended to all primary batches
             calib_embeds = rearrange(calib_embeds, '(b c) s e -> c (b s) e', c=n_channels)
@@ -452,13 +464,22 @@ class NeuroSignalEncoder(nn.Module):
         # Format inputs and run through the model
         primary_input = rearrange(primary_input, 'b s c -> (b c) s 1')
         if self.sc_encoder is not None:
+            if sc_sm_mask is not None:
+                # Expand the mask to fit the rearranged inputs
+                sc_sm_mask = repeat(sc_sm_mask, 'b s -> (b c) s', c=n_channels)
             sc_outputs = self.sc_encoder(
                 primary_input,
                 sm_mask = sc_sm_mask,
                 embed_hook = format_hook)
             sc_embeds = sc_outputs['embeddings']
-            sc_return_embeds = sc_embeds # Emebeds to be returned
-            sc_targets = sc_outputs['targets']
+
+            # Return tensors rearranged to match original input shape order
+            # The rearranging makes training easier later
+            sc_return_embeds = rearrange(sc_embeds,
+                '(b c) s e -> b s c e', c=n_channels)
+            sc_targets = rearrange(sc_outputs['targets'],
+                '(b c) s e -> b s c e', c=n_channels)
+
             format_hook = None # Make sure it doesn't get used again for mc encoder
         else:
             sc_embeds = primary_input

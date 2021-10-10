@@ -41,9 +41,9 @@ def generate_mask(mask_shape: Tuple, msm_config: dict, device: str = 'cpu') -> T
 
 def calculate_msm_losses(
     output_dict: dict[str, Tensor],
-    sc_mask: Tensor,
-    mc_mask: Tensor,
-    calib_mask: Tensor) -> dict[str, Tensor]:
+    sc_mask: Optional[Tensor] = None,
+    mc_mask: Optional[Tensor] = None,
+    calib_mask: Optional[Tensor] = None) -> dict[str, Tensor]:
     """
     Calculates the masked sequence modeling losses.
 
@@ -58,17 +58,23 @@ def calculate_msm_losses(
             - 'loss': The total MSM loss.
             - 'sc_loss': The single-channel MSM loss.
             - 'mc_loss': The multi-channel MSM loss.
+            - 'calib_loss': The multi-channel MSM loss.
     """
+    # Calculate MSM loss for the single-channel encoder if used
     sc_loss = 0
     if output_dict['sc_targets'] is not None:
         sc_embeds = output_dict['sc_embeddings']
         sc_targets = output_dict['sc_targets']
         
-        selection_mask = sc_mask.type(torch.bool).unsqueeze(2)
-        masked_sc_embeds = sc_embeds.masked_select(selection_mask)
-        masked_sc_targets = sc_targets.masked_select(selection_mask)
-        sc_loss = mse_loss(masked_sc_embeds, masked_sc_targets.detach(),
-            reduce=True, reduction='mean')
+        if sc_mask is not None:
+            selection_mask = sc_mask.type(torch.bool).unsqueeze(2).unsqueeze(3)
+            masked_sc_embeds = sc_embeds.masked_select(selection_mask)
+            masked_sc_targets = sc_targets.masked_select(selection_mask)
+            sc_loss = mse_loss(masked_sc_embeds, masked_sc_targets.detach(),
+                reduce=True, reduction='mean')
+        else:
+            sc_loss = mse_loss(sc_embeds, sc_targets.detach(),
+                reduce=True, reduction='mean')
 
     # Calculate MSM loss for the multi-channel encoder if used
     mc_loss = 0
@@ -76,11 +82,15 @@ def calculate_msm_losses(
         mc_embeds = output_dict['mc_embeddings']
         mc_targets = output_dict['mc_targets']
         
-        selection_mask = mc_mask.type(torch.bool).unsqueeze(2)
-        masked_mc_embeds = mc_embeds.masked_select(selection_mask)
-        masked_mc_targets = mc_targets.masked_select(selection_mask)
-        mc_loss = mse_loss(masked_mc_embeds, masked_mc_targets.detach(),
-            reduce=True, reduction='mean')
+        if mc_mask is not None:
+            selection_mask = mc_mask.type(torch.bool).unsqueeze(2)
+            masked_mc_embeds = mc_embeds.masked_select(selection_mask)
+            masked_mc_targets = mc_targets.masked_select(selection_mask)
+            mc_loss = mse_loss(masked_mc_embeds, masked_mc_targets.detach(),
+                reduce=True, reduction='mean')
+        else:
+            mc_loss = mse_loss(mc_embeds, mc_targets.detach(),
+                reduce=True, reduction='mean')
 
     # Calculate MSM loss for the calibration encoder if used
     calib_loss = 0
@@ -88,11 +98,15 @@ def calculate_msm_losses(
         calib_embeds = output_dict['calib_embeddings']
         calib_targets = output_dict['calib_targets']
         
-        selection_mask = calib_mask.type(torch.bool).unsqueeze(2)
-        masked_calib_embeds = calib_embeds.masked_select(selection_mask)
-        masked_calib_targets = calib_targets.masked_select(selection_mask)
-        calib_loss = mse_loss(masked_calib_embeds, masked_calib_targets.detach(),
-            reduce=True, reduction='mean')
+        if calib_mask is not None:
+            selection_mask = calib_mask.type(torch.bool).unsqueeze(2).unsqueeze(3)
+            masked_calib_embeds = calib_embeds.masked_select(selection_mask)
+            masked_calib_targets = calib_targets.masked_select(selection_mask)
+            calib_loss = mse_loss(masked_calib_embeds, masked_calib_targets.detach(),
+                reduce=True, reduction='mean')
+        else:
+            calib_loss = mse_loss(calib_embeds, calib_targets.detach(),
+                reduce=True, reduction='mean')
 
     # Calculate the total loss
     loss = sc_loss + mc_loss + calib_loss
@@ -127,32 +141,49 @@ def train_with_msm(
 
     for epoch in range(config['train_epochs']):
         model.train()
-        batch_losses = []
+        batch_losses = {'loss': [], 'sc_loss': [], 'mc_loss': [], 'calib_loss': []}
         for batch_idx, data in enumerate(train_loader):
-            data = data.to(config['device'])
+            # Unpack training data
+            primary_input = data['primary_input'].to(config['device'])
+            calib_input = data['calibration_input'].to(config['device'])
             
-            mask_shape = (data.shape[0], model.embed_seq_len)
-            sc_mask = generate_mask(mask_shape, msm_config, device=config['device'])
-            mc_mask = generate_mask(mask_shape, msm_config, device=config['device'])
-            calib_mask = generate_mask(mask_shape, msm_config, device=config['device'])
-            output_dict = model(data, sc_sm_mask=sc_mask,
-                mc_sm_mask=mc_mask, calib_mask=calib_mask)
+            # Create primary masks
+            primary_mask_shape = (primary_input.shape[0], model.embed_seq_len)
+            sc_mask = generate_mask(primary_mask_shape, msm_config, device=config['device'])
+            mc_mask = generate_mask(primary_mask_shape, msm_config, device=config['device'])
+
+            # Create calibration mask if needed
+            calib_mask = None
+            if model.calibration_model is not None:
+                calib_mask_shape = (calib_input.shape[0], model.calib_embed_seq_len)
+                calib_mask = generate_mask(calib_mask_shape, msm_config, device=config['device'])
+
+            # Run model
+            output_dict = model(
+                primary_input,
+                calibration_input = calib_input,
+                sc_sm_mask = sc_mask,
+                mc_sm_mask = mc_mask,
+                calib_sm_mask = calib_mask)
 
             # Calculate the masked sequence modeling losses
-            msm_losses = calculate_msm_losses(output_dict, sc_mask, mc_mask)
+            msm_losses = calculate_msm_losses(output_dict, sc_mask, mc_mask, calib_mask)
             loss = msm_losses['loss']
+            for loss_type in msm_losses.keys():
+                batch_losses[loss_type].append(msm_losses[loss_type].item())
 
-            batch_losses.append(loss.item())
+            # Calculate the total loss
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            if batch_idx % config['log_interval'] == 0:
+            if (batch_idx + 1) % config['log_interval'] == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.4f}'.format(
-                    epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader),
-                    np.mean(batch_losses[-config['log_interval']:])))
+                    epoch + 1, batch_idx + 1, len(train_loader.dataset),
+                    100. * (batch_idx + 1) / len(train_loader),
+                    np.mean(batch_losses['loss'][-config['log_interval']:])))
+                print({k: np.mean(l) for k, l in batch_losses.items()})
         if val_loader is not None:
             val_loss = validate(model, val_loader, config)
             print('Validation loss: {:.4f}'.format(val_loss))
@@ -168,20 +199,37 @@ def validate(model: NeuroSignalEncoder, val_loader: DataLoader, config: dict):
     """
     msm_config = config['msm_params']
     model.eval()
-    val_losses = []
+    val_losses = {'loss': [], 'sc_loss': [], 'mc_loss': [], 'calib_loss': []}
     with torch.no_grad():
         for data in val_loader:
-            data = data.to(config['device'])
+            # Unpack training data
+            primary_input = data['primary_input'].to(config['device'])
+            calib_input = data['calibration_input'].to(config['device'])
+            
+            # Create primary masks
+            primary_mask_shape = (primary_input.shape[0], model.embed_seq_len)
+            sc_mask = generate_mask(primary_mask_shape, msm_config, device=config['device'])
+            mc_mask = generate_mask(primary_mask_shape, msm_config, device=config['device'])
 
-            mask_shape = (data.shape[0], model.embed_seq_len)
-            sc_mask = generate_mask(mask_shape, msm_config, device=config['device'])
-            mc_mask = generate_mask(mask_shape, msm_config, device=config['device'])
-            output_dict = model(data, sc_sm_mask=sc_mask, mc_sm_mask=mc_mask)
+            # Create calibration mask if needed
+            calib_mask = None
+            if model.calibration_model is not None:
+                calib_mask_shape = (calib_input.shape[0], model.calib_embed_seq_len)
+                calib_mask = generate_mask(calib_mask_shape, msm_config, device=config['device'])
+
+            # Run model
+            output_dict = model(
+                primary_input,
+                calibration_input = calib_input,
+                sc_sm_mask = sc_mask,
+                mc_sm_mask = mc_mask,
+                calib_sm_mask = calib_mask)
 
             # Calculate the masked sequence modeling losses
-            msm_losses = calculate_msm_losses(output_dict, sc_mask, mc_mask)
+            msm_losses = calculate_msm_losses(output_dict, sc_mask, mc_mask, calib_mask)
             val_loss = msm_losses['loss']
+            for loss_type in msm_losses.keys():
+                val_losses[loss_type].append(msm_losses[loss_type].item())
 
-            val_losses.append(val_loss.item())
-    val_loss = np.mean(val_losses)
+    val_loss = np.mean(val_losses['loss'])
     return val_loss
