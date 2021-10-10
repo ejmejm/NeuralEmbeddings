@@ -2,3 +2,4 @@ __pycache__/
 .ipynb_checkpoints/
 models/*.pt
 *.ipynb
+old_testing.py

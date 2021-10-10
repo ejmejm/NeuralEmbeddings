@@ -83,6 +83,7 @@ class Wav2Vec(nn.Module):
         n_layers: int = 6,
         dropout: float = 0.5,
         n_head: int = 8,
+        feedforward_dim: int = 2048,
         include_conv: bool = True,
         include_transformer: bool = True):
         """
@@ -129,7 +130,7 @@ class Wav2Vec(nn.Module):
             transformer_layer = nn.TransformerEncoderLayer(
                 d_model = self.embedding_dim,
                 nhead = n_head,
-                dim_feedforward = self.embed_seq_len,
+                dim_feedforward = feedforward_dim,
                 dropout = dropout,
                 activation = 'relu',
                 batch_first=True
@@ -180,7 +181,6 @@ class Wav2Vec(nn.Module):
                 x = x * (1 - sm_mask.unsqueeze(2))
 
             x = self.encoder(x) # Mask could go here
-            # print(x)
 
         return {
             'embeddings': x,
@@ -199,61 +199,88 @@ class NeuroSignalEncoder(nn.Module):
     def __init__(self, config: dict):
         super().__init__()
         self.config = config
+        calib_config = config['calibration_module']
+        sc_config = config['single_channel_module']
+        mc_config = config['mixed_channel_module']
+
+        # Config validation
+        assert sc_config['enabled'] or mc_config['enabled'], \
+            'Must enable at least one of the single channel or mixed channel modules!'
+        assert sc_config['enabled'] or not calib_config['enabled'], \
+            'Cannot use the calibration model without a single-channel encoder!'
 
         # Initialize the calibration model
-        conv_config = config['calibration_conv']
-        encoder_config = config['calibration_encoder']
-        self.calibration_model = Wav2Vec(
-            input_dim = config['max_calibration_input_len'],
-            embedding_dim = config['embedding_dim'],
-            embed_reduc_factor = conv_config['stride'],
-            conv_width = conv_config['filter_size'],
-            n_layers = encoder_config['n_layers'],
-            dropout = encoder_config['dropout'],
-            n_head = encoder_config['n_head'],
-            include_conv = conv_config['enabled'],
-            include_transformer = encoder_config['enabled'])
+        if calib_config['enabled']:
+            self.calibration_model = Wav2Vec(
+                input_dim = config['max_calibration_input_len'],
+                embedding_dim = config['embedding_dim'],
+                embed_reduc_factor = calib_config['stride'],
+                conv_width = calib_config['filter_size'],
+                n_layers = calib_config['n_layers'],
+                dropout = calib_config['dropout'],
+                n_head = calib_config['n_head'],
+                feedforward_dim = calib_config['feedforward_dim'],
+                include_conv = True,
+                include_transformer = True)
+        else:
+            self.calibration_model = None
 
-        conv_config = config['primary_conv']
-        encoder_config = config['single_channel_encoder']
 
         # Calculate input dim to single channel encoder
         # Need to increase it to account for the calibration input and tags
         # TODO: Clean this up, it's a messy hack
-        calib_seq_len = self.calibration_model.embed_seq_len
-        # Maybe should use ceil here
-        adjusted_input_dim = int(calib_seq_len * conv_config['stride']) # Calib input
-        if config['calibration_encoder']['enabled']:
-            adjusted_input_dim += conv_config['stride'] # Calib tag
+        if self.calibration_model is not None:
+            calib_seq_len = self.calibration_model.embed_seq_len
+            # Maybe should use ceil here
+            adjusted_input_dim = int(calib_seq_len * sc_config['stride']) # Calib input
+            adjusted_input_dim += sc_config['stride'] # Calib tag
+        else:
+            adjusted_input_dim = 0
+            
         adjusted_input_dim += config['max_primary_input_len'] # Primary input
-        adjusted_input_dim += conv_config['stride'] # Primary tag
+        adjusted_input_dim += sc_config['stride'] # Primary tag
         
         # Initialize the single channel encoder
-        self.sc_encoder = Wav2Vec(
-            input_dim = adjusted_input_dim,
-            embedding_dim = config['embedding_dim'],
-            embed_reduc_factor = conv_config['stride'],
-            conv_width = conv_config['filter_size'],
-            n_layers = encoder_config['n_layers'],
-            dropout = encoder_config['dropout'],
-            n_head = encoder_config['n_head'],
-            include_conv = conv_config['enabled'],
-            include_transformer = encoder_config['enabled'])
-        self.embed_seq_len = self.sc_encoder.embed_seq_len
+        if sc_config['enabled']:
+            self.sc_encoder = Wav2Vec(
+                input_dim = adjusted_input_dim,
+                embedding_dim = config['embedding_dim'],
+                embed_reduc_factor = sc_config['stride'],
+                conv_width = sc_config['filter_size'],
+                n_layers = sc_config['n_layers'],
+                dropout = sc_config['dropout'],
+                n_head = sc_config['n_head'],
+                feedforward_dim = sc_config['feedforward_dim'],
+                include_conv = True,
+                include_transformer = True)
+            self.embed_seq_len = self.sc_encoder.embed_seq_len
+        else:
+            self.sc_encoder = None
 
         # Initialize the mixed channel encoder
-        encoder_config = config['mixed_channel_encoder']
-        input_channels = config['embedding_dim'] if \
-            config['single_channel_encoder']['enabled'] else 1
-        self.mc_encoder = Wav2Vec(
-            input_dim = self.sc_encoder.embed_seq_len,
-            input_channels = input_channels,
-            embedding_dim = config['embedding_dim'],
-            n_layers = encoder_config['n_layers'],
-            dropout = encoder_config['dropout'],
-            n_head = encoder_config['n_head'],
-            include_conv = False,
-            include_transformer = encoder_config['enabled'])
+        if mc_config['enabled']:
+            if sc_config['enabled']:
+                input_dim = self.sc_encoder.embed_seq_len
+                input_channels = config['embedding_dim']
+            else:
+                input_dim = adjusted_input_dim
+                input_channels = 1
+
+            self.mc_encoder = Wav2Vec(
+                input_dim = input_dim,
+                input_channels = input_channels,
+                embedding_dim = config['embedding_dim'],
+                embed_reduc_factor = mc_config['stride'],
+                conv_width = mc_config['filter_size'],
+                n_layers = mc_config['n_layers'],
+                dropout = mc_config['dropout'],
+                n_head = mc_config['n_head'],
+                feedforward_dim = mc_config['feedforward_dim'],
+                include_conv = not sc_config['enabled'],
+                include_transformer = True)
+            self.embed_seq_len = self.mc_encoder.embed_seq_len
+        else:
+            self.mc_encoder = None
 
         # Register index tensors as buffers
         # This way, their devices will be updated with the model's device
@@ -290,7 +317,7 @@ class NeuroSignalEncoder(nn.Module):
         calib_embeds: Tensor = None) -> Tensor:
         """
         Format the embeddings for the model by combining primary
-        and calibration inputs, and by addings appropriate tags.
+        and calibration inputs, and by prepending appropriate tags.
 
         Args:
             primary_embeds: embeddings for the primary sequence, shape [batch_size, seq_len, embedding_dim].
@@ -367,6 +394,7 @@ class NeuroSignalEncoder(nn.Module):
         primary_input: Tensor,
         sc_sm_mask: Optional[Tensor] = None,
         mc_sm_mask: Optional[Tensor] = None,
+        calib_sm_mask: Optional[Tensor] = None,
         calibration_input: Optional[Tensor] = None) -> Dict[str, Tensor]:
         """
         Generates emebeddings for the primary_input, using the calibration_input
@@ -378,24 +406,36 @@ class NeuroSignalEncoder(nn.Module):
                 where 1 = keep and 0 = mask, shape [batch_size, seq_len].
             mc_sm_mask: mask for multi-channel sequence modeling
                 where 1 = keep and 0 = mask, shape [batch_size, seq_len].
+            calib_sm_mask: mask for calibration sequence modeling
+                where 1 = keep and 0 = mask, shape [batch_size, seq_len].
             calibration_input: input tensor for calibration,
                 shape [batch_size, seq_len, n_channels].
 
         Returns:
             Dict, contains embeddings and target values.
         """
-        n_calib_channels = calibration_input.shape[2]
+
+        ### Input validation ###
+
+        if calibration_input is not None and self.calibration_model is None:
+            raise ValueError('Cannot provide a calibration input when the calibration model is disabled!')
+
         n_channels = primary_input.shape[2]
-        assert n_channels == n_calib_channels, \
-            f'Primary input channels ({n_channels}) must match calibration input channels ({n_calib_channels})'
+        if calibration_input is not None:
+            n_calib_channels = calibration_input.shape[2]
+            assert n_channels == n_calib_channels, \
+                f'Primary input channels ({n_channels}) must match calibration input channels ({n_calib_channels})'
+
+        ### Calibration module ###
 
         # Format calibration inputs and run them through the calibration model
         if calibration_input is not None:
             calibration_input = rearrange(calibration_input, 'b s c -> (b c) s 1')
             calib_outputs = self.calibration_model(
-                calibration_input, sm_mask=None)
+                calibration_input, sm_mask=calib_sm_mask)
             calib_embeds = calib_outputs['embeddings']
             calib_return_embeds = calib_embeds
+            calib_targets = calib_outputs['targets']
             # Note: calibration input and primary input batches are currently not aligned
             # All calibration batches are combined sequentially and prepended to all primary batches
             calib_embeds = rearrange(calib_embeds, '(b c) s e -> c (b s) e', c=n_channels)
@@ -405,31 +445,55 @@ class NeuroSignalEncoder(nn.Module):
             # Create hook to add tags
             format_hook = lambda x: self._format_embeddings(x)
             calib_return_embeds = None
+            calib_targets = None
+
+        ### Single-channel module ###
         
         # Format inputs and run through the model
         primary_input = rearrange(primary_input, 'b s c -> (b c) s 1')
-        sc_outputs = self.sc_encoder(
-            primary_input,
-            sm_mask = sc_sm_mask,
-            embed_hook = format_hook)
-        sc_embeds = sc_outputs['embeddings']
-        sc_targets = sc_outputs['targets']
+        if self.sc_encoder is not None:
+            sc_outputs = self.sc_encoder(
+                primary_input,
+                sm_mask = sc_sm_mask,
+                embed_hook = format_hook)
+            sc_embeds = sc_outputs['embeddings']
+            sc_return_embeds = sc_embeds # Emebeds to be returned
+            sc_targets = sc_outputs['targets']
+            format_hook = None # Make sure it doesn't get used again for mc encoder
+        else:
+            sc_embeds = primary_input
+            sc_return_embeds = None
+            sc_targets = None
+        
         sc_embeds = rearrange(sc_embeds, '(b c) s e -> b c s e', c=n_channels)
 
         # Combine channels into a mixed channel
-        mc_embeds = apply_channel_combine_func(
+        combined_embeds = apply_channel_combine_func(
             self.config['channel_combine_func'], sc_embeds)
+        output_embeds = combined_embeds
 
-        mc_outputs = self.mc_encoder(mc_embeds, mc_sm_mask)
-        output_embeds = mc_outputs['embeddings']
-        mc_targets = mc_outputs['targets']
+        ### Multi-channel module ###
+
+        if self.mc_encoder is not None:
+            mc_outputs = self.mc_encoder(
+                combined_embeds,
+                sm_mask = mc_sm_mask,
+                embed_hook = format_hook)
+            mc_embeds = mc_outputs['embeddings']
+            mc_targets = mc_outputs['targets']
+            output_embeds = mc_embeds
+        else:
+            mc_embeds = None
+            mc_targets = None
+
+        ### Returns ###
 
         return {
-            'embeddings': output_embeds,
-            'mc_embeddings': output_embeds,
+            'embeddings': output_embeds, # Final embeddings
+            'mc_embeddings': mc_embeds,
             'mc_targets': mc_targets,
-            'sc_embeddings': sc_embeds,
+            'sc_embeddings': sc_return_embeds,
             'sc_targets': sc_targets,
-            'calib_embeddings': calib_return_embeds
+            'calib_embeddings': calib_return_embeds,
+            'calib_targets': calib_targets
         }
-

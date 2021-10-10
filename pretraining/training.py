@@ -42,7 +42,8 @@ def generate_mask(mask_shape: Tuple, msm_config: dict, device: str = 'cpu') -> T
 def calculate_msm_losses(
     output_dict: dict[str, Tensor],
     sc_mask: Tensor,
-    mc_mask: Tensor) -> dict[str, Tensor]:
+    mc_mask: Tensor,
+    calib_mask: Tensor) -> dict[str, Tensor]:
     """
     Calculates the masked sequence modeling losses.
 
@@ -50,6 +51,7 @@ def calculate_msm_losses(
         output_dict: The output dictionary from the model.
         sc_mask: The single-channel model mask.
         mc_mask: The multi-channel model mask.
+        calib_mask: The calibration mask.
 
     Returns:
         A dictionary containing the separate and combined MSM losses.
@@ -80,13 +82,26 @@ def calculate_msm_losses(
         mc_loss = mse_loss(masked_mc_embeds, masked_mc_targets.detach(),
             reduce=True, reduction='mean')
 
+    # Calculate MSM loss for the calibration encoder if used
+    calib_loss = 0
+    if output_dict['calib_targets'] is not None:
+        calib_embeds = output_dict['calib_embeddings']
+        calib_targets = output_dict['calib_targets']
+        
+        selection_mask = calib_mask.type(torch.bool).unsqueeze(2)
+        masked_calib_embeds = calib_embeds.masked_select(selection_mask)
+        masked_calib_targets = calib_targets.masked_select(selection_mask)
+        calib_loss = mse_loss(masked_calib_embeds, masked_calib_targets.detach(),
+            reduce=True, reduction='mean')
+
     # Calculate the total loss
-    loss = sc_loss + mc_loss
+    loss = sc_loss + mc_loss + calib_loss
 
     return {
         'loss': loss,
         'sc_loss': sc_loss,
-        'mc_loss': mc_loss
+        'mc_loss': mc_loss,
+        'calib_loss': calib_loss
     }
 
 def train_with_msm(
@@ -119,7 +134,9 @@ def train_with_msm(
             mask_shape = (data.shape[0], model.embed_seq_len)
             sc_mask = generate_mask(mask_shape, msm_config, device=config['device'])
             mc_mask = generate_mask(mask_shape, msm_config, device=config['device'])
-            output_dict = model(data, sc_sm_mask=sc_mask, mc_sm_mask=mc_mask)
+            calib_mask = generate_mask(mask_shape, msm_config, device=config['device'])
+            output_dict = model(data, sc_sm_mask=sc_mask,
+                mc_sm_mask=mc_mask, calib_mask=calib_mask)
 
             # Calculate the masked sequence modeling losses
             msm_losses = calculate_msm_losses(output_dict, sc_mask, mc_mask)

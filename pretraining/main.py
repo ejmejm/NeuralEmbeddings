@@ -37,51 +37,20 @@ if __name__ == '__main__':
     test_loader = dataloaders['test']
 
     # Create the model
-    conv_config = model_config['primary_conv']
-    encoder_config = model_config['single_channel_encoder']
-    # model = Wav2Vec(
-    #     input_dim = model_config['max_primary_input_len'],
-    #     embedding_dim = model_config['embedding_dim'],
-    #     embed_reduc_factor = conv_config['stride'],
-    #     conv_width = conv_config['filter_size'],
-    #     n_layers = encoder_config['n_layers'],
-    #     dropout = encoder_config['dropout'],
-    #     n_head = encoder_config['n_head'],
-    #     include_conv = conv_config['enabled'],
-    #     include_transformer = encoder_config['enabled'])
     model = NeuroSignalEncoder(model_config)
     model = model.to(config['device'])
 
-    # TODO: REMINDER, I need to fix the maximum input size to work with the addition of tokens 
     out = model(torch.ones((2, 512, 20), dtype=torch.float32, device=config['device']),
         calibration_input = 2 * torch.ones((1, 1024, 20), dtype=torch.float32, device=config['device']))
-
-    print(out)
+    # print(out)
     print(out['embeddings'].shape)
-
-    # from models import PAD_TOKEN, CALIB_TOKEN
-    # print('DIFJIOSDFJI', model.__getattr__(f'{PAD_TOKEN}_idx'))
-    # print(model._token_to_idx(PAD_TOKEN).device)
-    # print(model.token_embeddings.weight.device)
-    # print(model._get_token_embeddings([PAD_TOKEN, CALIB_TOKEN]))
-
-    # print('----------------------')
-
-    # calib = torch.ones((5, 2, 16), dtype=torch.float32, device=config['device'])
-    # prim = 2 * torch.ones((2, 5, 1, 16), dtype=torch.float32, device=config['device'])
-    # print('prim only')
-    # print(model._format_embeddings(prim))
-    # print(model._format_embeddings(prim).shape)
-    # print('comb')
-    # print(model._format_embeddings(prim, calib))
-    # print(model._format_embeddings(prim, calib).shape)
 
     # Train the model
     # train_with_msm(model, config, train_loader, val_loader)
 
-    # Save the model
-    save_path = os.path.join(base_dir, model_config['save_path'])
-    torch.save(model.state_dict(), save_path)
+    # # Save the model
+    # save_path = os.path.join(base_dir, model_config['save_path'])
+    # torch.save(model.state_dict(), save_path)
 
 
 

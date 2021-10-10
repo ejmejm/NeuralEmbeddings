@@ -64,42 +64,46 @@ model:
 
   ### Primary Model ###
 
-  # Convolution layer parameters
-  primary_conv:
+  # Single channel module params
+  single_channel_module:
     enabled: True
 
+    # Conv
     filter_size: 32
     stride: 16
 
-  # Single channel encoder parameters
-  single_channel_encoder:
-    enabled: True
-
+    # Transformer
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
+    feedforward_dim: 256
 
-  # Mixed channel encoder parameters
-  mixed_channel_encoder:
+  # Mixed channel module parameters
+  mixed_channel_module:
     enabled: True
 
+    # Conv (NOT USED unless the single channel module is disabled)
+    filter_size: 32
+    stride: 16
+
+    # Transformer
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
+    feedforward_dim: 256
 
   ### Calibration Model ###
   
-  # Convolution layer parameters
-  calibration_conv:
+  # Calibration module params
+  calibration_module:
     enabled: True
 
+    # Conv
     filter_size: 64
     stride: 32
 
-  # Single channel encoder parameters
-  calibration_encoder:
-    enabled: True
-
+    # Transformer
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
+    feedforward_dim: 256
