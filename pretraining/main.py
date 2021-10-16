@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import torch
+import wandb
 
 from data_loading import prepare_dataloaders, load_config
 from models import NeuroSignalEncoder
@@ -26,6 +27,9 @@ if __name__ == '__main__':
     config = load_config(config_path)
     model_config = config['model']
 
+    # Init wandb for logging
+    wandb.init(project='neural-embeddings', config=config)
+
     # Set seeds
     np.random.seed(config['seed'])
     torch.manual_seed(config['seed'])
@@ -39,6 +43,7 @@ if __name__ == '__main__':
     # Create the model
     model = NeuroSignalEncoder(model_config)
     model = model.to(config['device'])
+    wandb.watch(model, log_freq=100)
 
     # out = model(
     #     torch.ones((2, 512, 20), dtype=torch.float32, device=config['device']),
@@ -55,11 +60,11 @@ if __name__ == '__main__':
     # Train the model
     train_with_msm(model, config, train_loader, val_loader)
 
-    # # Save the model
-    # save_path = os.path.join(base_dir, model_config['save_path'])
-    # torch.save(model.state_dict(), save_path)
+    # Save the model
+    save_path = os.path.join(base_dir, model_config['save_path'])
+    torch.save(model.state_dict(), save_path)
 
-
+    wandb.finish()
 
     # # Test the model
     # test_with_msm(model, test_loader, train_config)

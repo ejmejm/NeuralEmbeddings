@@ -5,14 +5,14 @@
 #############################################
 
 
-seed: 0
+seed: 8
 
 
 ### Training ###
 
 
-train_epochs: 10
-learning_rate: 0.001
+train_epochs: 500
+learning_rate: 0.0001
 log_interval: 16
 device: "cuda"
 
@@ -21,9 +21,9 @@ train_method: "MSM"
 # The method params only need to be defined
 # for the method being used
 msm_params:
-  mask_prob: 0.15
+  mask_prob: 0.1
   min_mask_len: 2
-  max_mask_len: 8
+  max_mask_len: 4
   
 cpc_params:
   wip: True

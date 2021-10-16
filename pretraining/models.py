@@ -149,7 +149,7 @@ class Wav2Vec(nn.Module):
 
         Args:
             x: input tensor, shape [batch_size, seq_len, n_channels].
-            sm_mask: mask for sequence modeling where 1 = keep and 0 = mask,
+            sm_mask: mask for sequence modeling where 1 = mask and 0 = keep,
                 shape [batch_size, seq_len].
             embed_hook: function to apply to the embeddings before passing them
                 through the transformer. 
@@ -171,15 +171,15 @@ class Wav2Vec(nn.Module):
         # B x S x E
         targets = None
         if self.include_transformer:
-            # TODO: Double check positional encodings are working correctly
-            # Update: I think I fixed the issue, but I haven't tested extensively yet
-            x = self.pos_enc(x)
-
             # Apply the mask for masked sequence modeling if applicable
             if sm_mask is not None:
                 targets = x
                 # TODO: Fix the issue where special tags can be masked
                 x = x * (1 - sm_mask.unsqueeze(2))
+
+            # TODO: Double check positional encodings are working correctly and applied in correct place
+            # Update: I think I fixed the issue, but I haven't tested extensively yet
+            x = self.pos_enc(x)
 
             x = self.encoder(x) # Mask could go here
 
@@ -231,7 +231,6 @@ class NeuroSignalEncoder(nn.Module):
 
         # Calculate input dim to single channel encoder
         # Need to increase it to account for the calibration input and tags
-        # TODO: Clean this up, it's a messy hack
         if self.calibration_model is not None:
             calib_seq_len = self.calibration_model.embed_seq_len
             # Maybe should use ceil here

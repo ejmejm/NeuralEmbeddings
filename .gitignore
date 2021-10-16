@@ -1,5 +1,6 @@
 __pycache__/
 .ipynb_checkpoints/
+wandb/
 models/*.pt
 *.ipynb
 old_testing.py

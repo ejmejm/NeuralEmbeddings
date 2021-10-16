@@ -33,7 +33,6 @@ class BatchTensorDataset(Dataset):
     def __getitem__(self, idx: int) -> Tensor:
         start_idx = idx * self.total_unit_size
         end_idx = start_idx + self.total_unit_size
-        # TODO: Stop grabbing just the first channel once full model is ready
         data = self.data[start_idx:end_idx]
         return {
             'calibration_input': data[:self.calib_unit_size].unsqueeze(0),
