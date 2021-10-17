@@ -7,7 +7,6 @@ from sklearn.preprocessing import StandardScaler
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, random_split
-import yaml
 
 
 class BatchTensorDataset(Dataset):
@@ -40,10 +39,6 @@ class BatchTensorDataset(Dataset):
                 self.batch_size, self.primary_unit_size, data.shape[1])
         }
 
-
-def load_config(path: str) -> dict:
-    with open(path, 'r') as f:
-        return yaml.load(f)
 
 def load_data():
     """

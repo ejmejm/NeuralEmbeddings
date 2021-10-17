@@ -5,9 +5,10 @@ import numpy as np
 import torch
 import wandb
 
-from data_loading import prepare_dataloaders, load_config
+from config_handling import load_config, to_wandb_format
+from data_loading import prepare_dataloaders
 from models import NeuroSignalEncoder
-from training import train_with_msm
+from training.msm import train_with_msm
 
 ### Create argparser for command line arguments ###
 
@@ -28,7 +29,8 @@ if __name__ == '__main__':
     model_config = config['model']
 
     # Init wandb for logging
-    wandb.init(project='neural-embeddings', config=config)
+    wandb_config = to_wandb_format(config)
+    wandb.init(project='neural-embeddings', config=wandb_config)
 
     # Set seeds
     np.random.seed(config['seed'])
