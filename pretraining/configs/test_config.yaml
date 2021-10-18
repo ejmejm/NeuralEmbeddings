@@ -14,7 +14,7 @@ seed: 8
 train_epochs: 10
 learning_rate: 0.0001
 log_interval: 16
-device: "cuda"
+device: "cpu"
 
 train_method: "MSM"
 
@@ -107,3 +107,34 @@ model:
     dropout: 0.4
     n_head: 2 # N heads for the attention
     feedforward_dim: 256
+
+
+# PREPROCESSING STUFF
+
+data_file_type: ".fif"
+data_type: "MEG" # Valid values: [MEG, EEG]
+
+train_dir: "./train_datasets"
+test_dir: "./test_datasets"
+
+common_sfreq: 1000.0
+high_pass_cut_off: 0.1
+
+
+use_standardization: False
+use_normalization: True
+use_high_pass_filter: False
+
+use_ica: False
+
+ica:
+  n_components: 0.95
+  random_state: 0
+  max_iter: 500
+
+
+train_val_preprocessed: "train_preprocessed_runs"
+test_preprocessed: "test_preprocessed_runs"
+
+train_val_info: 'dataset_information_train.data'
+test_info: 'dataset_information_test.data'

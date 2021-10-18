@@ -40,7 +40,7 @@ if __name__ == '__main__':
     dataloaders = prepare_dataloaders(config)
     train_loader = dataloaders['train']
     val_loader = dataloaders['val']
-    test_loader = dataloaders['test']
+    # test_loader = dataloaders['test']
 
     # Create the model
     model = NeuroSignalEncoder(model_config)
