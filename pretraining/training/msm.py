@@ -27,6 +27,10 @@ def generate_mask(mask_shape: Tuple, msm_config: dict, device: str = 'cpu') -> T
 
     # Expand masks to the correct sizes
     for batch_idx in range(mask.shape[0]):
+        # If this mask is empty, add a single entry
+        if sum(mask[batch_idx]) == 0:
+            mask[batch_idx, np.random.randint(0, mask.shape[1])] = 1
+            
         seq_idx = 0
         while seq_idx < mask.shape[1]:
             if mask[batch_idx, seq_idx] == 1:
