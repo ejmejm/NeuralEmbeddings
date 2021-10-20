@@ -329,18 +329,26 @@ def train_with_msm(
             loss.backward()
             optimizer.step()
 
-            if (batch_idx + 1) % config['log_interval'] == 0:
+            if (batch_idx + 1) % config['log_interval'] == 0 or \
+               (batch_idx + 1) == len(train_loader):
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
                     epoch + 1, batch_idx + 1, len(train_loader.dataset),
                     100. * (batch_idx + 1) / len(train_loader)))
                 print_loss_map(batch_losses)
                 # print({k: np.mean(l) for k, l in batch_losses.items()})
-        if val_loader is not None:
-            val_losses = validate(model, val_loader, config)
-            print('Validation losses:')
-            print_loss_map(val_losses)
-            wandb.log({('val_' + k): np.mean(v) for k, v in val_losses.items()})
-            print()
+
+            # Do validation at the end of each epoch
+            # and every `config['val_interval']` batches
+            do_validation = val_loader is not None and \
+                    (config['val_interval'] is not None and \
+                    (batch_idx + 1) % config['val_interval'] == 0) or \
+                    (batch_idx + 1) == len(train_loader)
+            if do_validation:
+                val_losses = validate(model, val_loader, config)
+                print('Validation losses:')
+                print_loss_map(val_losses)
+                wandb.log({('val_' + k): np.mean(v) for k, v in val_losses.items()})
+                print()
     
     # Log the std of the per-dimension embeddings to help identify underfitting
     std_dict = calculate_embed_std(model, train_loader, config)
