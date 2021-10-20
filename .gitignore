@@ -1,6 +1,7 @@
 __pycache__/
 .ipynb_checkpoints/
 wandb/
+data/
 models/*.pt
 *.ipynb
 old_testing.py

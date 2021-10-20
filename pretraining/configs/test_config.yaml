@@ -34,6 +34,7 @@ swav_params:
 
 ### Data ###
 
+
 data_type: "MEG" # Valid values: [MEG, EEG]
 
 # Number of samples = unit size * batch size
@@ -49,6 +50,37 @@ batch_size: 2
 
 val_split: 0.05 # Percentage of data used for validation
 test_split: 0.15 # Percentage of data used for testing
+
+
+### Preprocessing ###
+
+
+data_file_type: ".fif"
+
+train_dir: "data/train_datasets"
+test_dir: "data/test_datasets"
+
+common_sfreq: 1000.0
+high_pass_cut_off: 0.1
+
+# Only one of standardization and normalization can be used
+use_standardization: False
+use_normalization: True
+use_high_pass_filter: False
+
+# ICA
+use_ica: False
+ica:
+  n_components: 0.95
+  max_iter: 500
+
+# Save paths for preprocessed data
+train_val_preprocessed: "data/train_preprocessed"
+test_preprocessed: "data/test_preprocessed"
+
+# Save filename for metadata (wihout filetype)
+train_val_info: "dataset_info"
+test_info: "dataset_info"
 
 
 ### Model ###
@@ -107,34 +139,3 @@ model:
     dropout: 0.4
     n_head: 2 # N heads for the attention
     feedforward_dim: 256
-
-
-# PREPROCESSING STUFF
-
-data_file_type: ".fif"
-data_type: "MEG" # Valid values: [MEG, EEG]
-
-train_dir: "./train_datasets"
-test_dir: "./test_datasets"
-
-common_sfreq: 1000.0
-high_pass_cut_off: 0.1
-
-
-use_standardization: False
-use_normalization: True
-use_high_pass_filter: False
-
-use_ica: False
-
-ica:
-  n_components: 0.95
-  random_state: 0
-  max_iter: 500
-
-
-train_val_preprocessed: "train_preprocessed_runs"
-test_preprocessed: "test_preprocessed_runs"
-
-train_val_info: 'dataset_information_train.data'
-test_info: 'dataset_information_test.data'
