@@ -26,10 +26,15 @@ def run_sweep_iteration():
         # Get sweep iteration config
         config = from_wandb_format(wandb.config)
 
-        # Set seeds
-        if config['seed'] is not None:
-            np.random.seed(config['seed'])
-            torch.manual_seed(config['seed'])
+        # Choose random seed if not provided
+        if config['seed'] is None:
+            config['seed'] = np.random.randint(0, 2**32)
+
+        # Set and log seed
+        np.random.seed(config['seed'])
+        torch.manual_seed(config['seed'])
+        wandb.log({'seed': config['seed']})
+        print('seed:', config['seed'])
 
         # Prepare the data
         dataloaders = prepare_dataloaders(config)

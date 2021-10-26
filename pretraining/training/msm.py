@@ -1,8 +1,9 @@
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
 from torch import optim, Tensor
+from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader
 import wandb
@@ -61,9 +62,9 @@ def calculate_msm_losses(
     Returns:
         A dictionary containing the separate and combined MSM losses.
             - 'loss': The total MSM loss.
-            - 'sc_loss': The single-channel MSM loss.
-            - 'mc_loss': The multi-channel MSM loss.
-            - 'calib_loss': The multi-channel MSM loss.
+            - 'sc': The single-channel MSM loss.
+            - 'mc': The multi-channel MSM loss.
+            - 'calib': The multi-channel MSM loss.
     """
     # Calculate MSM loss for the single-channel encoder if used
     sc_loss = 0
@@ -118,9 +119,9 @@ def calculate_msm_losses(
 
     return {
         'loss': loss,
-        'sc_loss': sc_loss,
-        'mc_loss': mc_loss,
-        'calib_loss': calib_loss
+        'sc': sc_loss,
+        'mc': mc_loss,
+        'calib': calib_loss
     }
 
 def calculate_embed_std(
@@ -241,11 +242,11 @@ def create_loss_map(model_config: dict) -> dict:
     """
     losses = {'loss': []}
     if model_config['single_channel_module']['enabled']:
-        losses['sc_loss'] = []
+        losses['sc'] = []
     if model_config['mixed_channel_module']['enabled']:
-        losses['mc_loss'] = []
+        losses['mc'] = []
     if model_config['calibration_module']['enabled']:
-        losses['calib_loss'] = []
+        losses['calib'] = []
     return losses
 
 def print_loss_map(losses: dict) -> None:
@@ -257,8 +258,122 @@ def print_loss_map(losses: dict) -> None:
     """
     base_str = ''
     for key, value in losses.items():
-        base_str += '{}: {:.4f}\t'.format(key, np.mean(value))
+        loss_name = key
+        if 'loss' not in loss_name:
+            loss_name += '_loss'
+        base_str += '{}: {:.4f}\t'.format(loss_name, np.mean(value))
     print(base_str)
+
+def create_optimizers(model: NeuroSignalEncoder, config: dict) -> dict:
+    """
+    Creates the optimizers for the model, leaving out
+    optimizers for disabled modules.
+
+    Args:
+        model: The model to create the optimizers for.
+        config: The configuration dictionary.
+
+    Returns:
+        A dictionary containing the optimizers.
+    """
+    optimizers = {}
+    msm_params = config['msm_params']
+
+    if model.sc_encoder is not None:
+        sc_lr = msm_params['sc_lr'] \
+            if 'sc_lr' in msm_params \
+                and msm_params['sc_lr'] is not None \
+            else config['learning_rate']
+        optimizer = optim.Adam(model.sc_encoder.parameters(), lr=sc_lr)
+        optimizers['sc'] = optimizer
+
+    if model.mc_encoder is not None:
+        mc_lr = msm_params['mc_lr'] \
+            if 'mc_lr' in msm_params \
+                and msm_params['mc_lr'] is not None \
+            else config['learning_rate']
+        optimizer = optim.Adam(model.mc_encoder.parameters(), lr=mc_lr)
+        optimizers['mc'] = optimizer
+
+    if model.calibration_model is not None:
+        calib_lr = msm_params['calib_lr'] \
+            if 'calib_lr' in msm_params \
+                and msm_params['calib_lr'] is not None \
+            else config['learning_rate']
+        optimizer = optim.Adam(model.calibration_model.parameters(), lr=calib_lr)
+        optimizers['calib'] = optimizer
+
+    return optimizers
+
+def update_weights(optimizers: dict, losses: dict):
+    """
+    Updates the weights of the model based on the losses.
+
+    Args:
+        optimizers: Dictionary of the optimizers for the model.
+        losses: Dictionary of the losses for the model.
+    """
+    for key in ['mc', 'sc', 'calib']:
+        if key in optimizers:
+            optimizers[key].zero_grad()
+            # TODO: Make sure there is no memory leak happening here
+            losses[key].backward(retain_graph=True)
+            optimizers[key].step()
+
+def create_schedulers(optimizers: dict, config: dict) -> dict:
+    """
+    Creates exponential decaying schedulers for the optimizers.
+
+    Args:
+        optimizers: The optimizers for the model.
+        config: The configuration dictionary.
+
+    Returns:
+        A dictionary containing the schedulers.
+    """
+    schedulers = {}
+
+    # The decay is split into phases based on the number of modules in the model
+    # In each phase, a later stage of the model starts to decay
+    # Here, we calculate the ideal gamma needed to meet the desired decay
+    n_epochs = config['train_epochs']
+    # `phase_decay` is the target decay per phase of the scheduler.
+    phase_decay = config['msm_params']['phase_decay']
+    n_phases = len(optimizers)
+    epochs_per_phase = max(1, n_epochs // n_phases)
+    gamma = np.power(phase_decay, 1 / epochs_per_phase)
+
+    for key, optimizer in optimizers.items():
+        scheduler = ExponentialLR(optimizer, gamma=gamma)
+        schedulers[key] = scheduler
+    return schedulers
+
+def update_lrs(schedulers: dict, epoch: int, total_epochs: int) -> dict:
+    """
+    Updates the learning rates in a phased approach.
+    The decay is split into phases based on the number of modules in the model.
+    In each phase, a later stage of the model starts to decay.
+    The phase length is based on the number of modules and total number of epochs.
+
+    Args:
+        schedulers: The schedulers for the model.
+        epoch: The current epoch.
+        total_epochs: The total number of epochs.
+    
+    Returns:
+        A dictionary containing the new learning rates.
+    """
+    # Make sure the keys are in the same order as the phases
+    keys = [key for key in ['calib', 'sc', 'mc'] if key in schedulers]
+    epochs_per_phase = max(1, total_epochs // len(keys))
+
+    # Update schedulers based on the current phase
+    for i, key in enumerate(keys):
+        if epoch >= i * epochs_per_phase:
+            schedulers[key].step()
+
+    # Return the latest learning rates
+    return {key: schedulers[key].get_last_lr()[0] for key in keys}
 
 def train_with_msm(
     model: NeuroSignalEncoder,
@@ -278,8 +393,14 @@ def train_with_msm(
         val_loader: The data loader for validation.
     """
     msm_config = config['msm_params']
+    scheduler_enabled = msm_config['scheduler_enabled']
 
-    optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
+    optimizers = create_optimizers(model, config)
+    # Track the learning rates for logging
+    learning_rates = {k: v.param_groups[0]['lr'] \
+        for k, v in optimizers.items()}
+    if scheduler_enabled:
+        schedulers = create_schedulers(optimizers, config)
 
     # Calculate initial validation loss
     val_losses = validate(model, val_loader, config)
@@ -289,11 +410,17 @@ def train_with_msm(
         model.train()
         batch_losses = create_loss_map(config['model'])
         for batch_idx, data in enumerate(train_loader):
+            if batch_idx >= 8:
+                break
+
             wandb.log({'epoch': epoch})
             
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
             calib_input = data['calibration_input'].to(config['device'])
+
+            # Shuffle the primary input
+            primary_input = primary_input[torch.randperm(primary_input.shape[0])]
             
             # Create primary masks
             primary_mask_shape = (primary_input.shape[0], model.embed_seq_len)
@@ -318,16 +445,16 @@ def train_with_msm(
 
             # Calculate the masked sequence modeling losses
             msm_losses = calculate_msm_losses(output_dict, sc_mask, mc_mask, calib_mask)
-            loss = msm_losses['loss']
             for loss_type in batch_losses.keys():
                 batch_losses[loss_type].append(msm_losses[loss_type].item())
-            wandb.log(msm_losses)
 
-            # Calculate the total loss
+            # Log losses
+            wandb.log({k + '_loss': v for k, v in msm_losses.items()})
+            # Log learning rates
+            wandb.log({k + '_lr': v for k, v in learning_rates.items()})
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            # Calcualte losses and update weights
+            update_weights(optimizers, msm_losses)
 
             if (batch_idx + 1) % config['log_interval'] == 0 or \
                (batch_idx + 1) == len(train_loader):
@@ -335,7 +462,6 @@ def train_with_msm(
                     epoch + 1, batch_idx + 1, len(train_loader.dataset),
                     100. * (batch_idx + 1) / len(train_loader)))
                 print_loss_map(batch_losses)
-                # print({k: np.mean(l) for k, l in batch_losses.items()})
 
             # Do validation at the end of each epoch
             # and every `config['val_interval']` batches
@@ -347,11 +473,15 @@ def train_with_msm(
                 val_losses = validate(model, val_loader, config)
                 print('Validation losses:')
                 print_loss_map(val_losses)
-                wandb.log({('val_' + k): np.mean(v) for k, v in val_losses.items()})
+                wandb.log({('val_' + k + '_loss'): np.mean(v) for k, v in val_losses.items()})
                 print()
+        
+        # Update learning rates
+        if scheduler_enabled:
+            learning_rates = update_lrs(schedulers, epoch, config['train_epochs'])
     
     # Log the std of the per-dimension embeddings to help identify underfitting
-    std_dict = calculate_embed_std(model, train_loader, config)
+    std_dict = calculate_embed_std(model, val_loader, config)
     std_dict = {k: np.mean(v) for k, v in std_dict.items() if v is not None}
     wandb.log(std_dict)
     print('Per embedding dim stds:', std_dict)

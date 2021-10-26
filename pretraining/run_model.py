@@ -35,9 +35,15 @@ def train(config: dict):
     wandb_config = to_wandb_format(config)
     wandb.init(project='neural-embeddings', config=wandb_config)
 
-    # Set seeds
+    # Choose random seed if not provided
+    if config['seed'] is None:
+        config['seed'] = np.random.randint(0, 2**31)
+
+    # Set and log seed
     np.random.seed(config['seed'])
     torch.manual_seed(config['seed'])
+    wandb.log({'seed': config['seed']})
+    print('seed:', config['seed'])
 
     # Prepare the data
     dataloaders = prepare_dataloaders(config)

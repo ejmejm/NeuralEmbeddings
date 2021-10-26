@@ -9,13 +9,12 @@ seed: null
 
 
 ### Training ###
-# TODO: Log standard deviation of predictions between batches
-# after each batch instead of at the end of training
 
-train_epochs: 6
+
+train_epochs: 60
 learning_rate: 0.001
-log_interval: 4
-val_interval: 32
+log_interval: 64
+val_interval: 512
 device: "cuda"
 
 train_method: "MSM"
@@ -65,8 +64,8 @@ test_split: 0.15 # Percentage of data used for testing
 
 data_file_type: ".fif"
 
-train_dir: "data/small_train_datasets"
-test_dir: "data/small_test_datasets"
+train_dir: "data/train_datasets"
+test_dir: "data/test_datasets"
 
 common_sfreq: 1000.0
 high_pass_cut_off: 0.1
@@ -83,8 +82,8 @@ ica:
   max_iter: 500
 
 # Save paths for preprocessed data
-train_val_preprocessed: "data/small_train_preprocessed"
-test_preprocessed: "data/small_test_preprocessed"
+train_val_preprocessed: "data/train_preprocessed"
+test_preprocessed: "data/test_preprocessed"
 
 # Save filename for metadata (wihout filetype)
 train_val_info: "dataset_info"
@@ -95,7 +94,7 @@ test_info: "dataset_info"
 
 
 model:
-  save_path: "../models/test_model.pt"
+  save_path: "../models/msm_model.pt"
 
   max_primary_input_len: 1024
   max_calibration_input_len: 2048
