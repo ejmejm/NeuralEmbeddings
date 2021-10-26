@@ -375,6 +375,28 @@ def update_lrs(schedulers: dict, epoch: int, total_epochs: int) -> dict:
     # Return the latest learning rates
     return {key: schedulers[key].get_last_lr()[0] for key in keys}
 
+def format_loss_map(losses: dict, prepend='') -> dict:
+    """
+    Formats the loss map for logging.
+
+    Args:
+        losses: The loss map.
+        prepend: The string to prepend to the loss name.
+
+    Returns:
+        A dictionary containing the formatted losses.
+    """
+    formatted_losses = {}
+    for key, value in losses.items():
+        loss_name = key
+        if 'loss' not in loss_name:
+            loss_name += '_loss'
+        loss_name = prepend + loss_name
+        if isinstance(value, list):
+            value = np.mean(value)
+        formatted_losses[loss_name] = value
+    return formatted_losses
+
 def train_with_msm(
     model: NeuroSignalEncoder,
     config: dict,
@@ -404,17 +426,12 @@ def train_with_msm(
 
     # Calculate initial validation loss
     val_losses = validate(model, val_loader, config)
-    wandb.log({('val_' + k): np.mean(v) for k, v in val_losses.items()})
+    wandb.log(format_loss_map(val_losses, 'val_'))
 
     for epoch in range(config['train_epochs']):
         model.train()
         batch_losses = create_loss_map(config['model'])
         for batch_idx, data in enumerate(train_loader):
-            if batch_idx >= 8:
-                break
-
-            wandb.log({'epoch': epoch})
-            
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
             calib_input = data['calibration_input'].to(config['device'])
@@ -448,8 +465,10 @@ def train_with_msm(
             for loss_type in batch_losses.keys():
                 batch_losses[loss_type].append(msm_losses[loss_type].item())
 
+            # Log epoch
+            wandb.log({'epoch': epoch})
             # Log losses
-            wandb.log({k + '_loss': v for k, v in msm_losses.items()})
+            wandb.log(format_loss_map(msm_losses))
             # Log learning rates
             wandb.log({k + '_lr': v for k, v in learning_rates.items()})
 
@@ -473,7 +492,7 @@ def train_with_msm(
                 val_losses = validate(model, val_loader, config)
                 print('Validation losses:')
                 print_loss_map(val_losses)
-                wandb.log({('val_' + k + '_loss'): np.mean(v) for k, v in val_losses.items()})
+                wandb.log(format_loss_map(val_losses, 'val_'))
                 print()
         
         # Update learning rates

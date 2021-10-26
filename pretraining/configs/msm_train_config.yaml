@@ -143,6 +143,6 @@ model:
 
     # Transformer
     n_layers: 2
-    dropout: 0.4
+    dropout: 0.5
     n_head: 2 # N heads for the attention
-    feedforward_dim: 128
+    feedforward_dim: 32
