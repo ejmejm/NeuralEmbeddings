@@ -249,18 +249,20 @@ def create_loss_map(model_config: dict) -> dict:
         losses['calib'] = []
     return losses
 
-def print_loss_map(losses: dict) -> None:
+def print_loss_map(losses: dict,  prepend: str = '') -> None:
     """
     Prints the loss map.
 
     Args:
         losses: The loss map.
+        prepend: A string to prepend to the name of each loss.
     """
     base_str = ''
     for key, value in losses.items():
         loss_name = key
         if 'loss' not in loss_name:
             loss_name += '_loss'
+        loss_name = prepend + loss_name
         base_str += '{}: {:.4f}\t'.format(loss_name, np.mean(value))
     print(base_str)
 
@@ -437,7 +439,8 @@ def train_with_msm(
             calib_input = data['calibration_input'].to(config['device'])
 
             # Shuffle the primary input
-            primary_input = primary_input[torch.randperm(primary_input.shape[0])]
+            if msm_config['shuffle_in_batch']:
+                primary_input = primary_input[torch.randperm(primary_input.shape[0])]
             
             # Create primary masks
             primary_mask_shape = (primary_input.shape[0], model.embed_seq_len)
@@ -494,6 +497,7 @@ def train_with_msm(
                 print_loss_map(val_losses)
                 wandb.log(format_loss_map(val_losses, 'val_'))
                 print()
+                model.train()
         
         # Update learning rates
         if scheduler_enabled:
