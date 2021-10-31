@@ -8,9 +8,16 @@
 seed: null
 
 
+### Weights & Biases Integration ###
+
+
+wandb_mode: "offline" # ["online", "offline", "disabled"]
+wandb_entity: "652_neural_embed_team"
+wandb_project: "neural-embeddings"
+
+
 ### Training ###
-# TODO: Log standard deviation of predictions between batches
-# after each batch instead of at the end of training
+
 
 train_epochs: 4
 learning_rate: 0.001

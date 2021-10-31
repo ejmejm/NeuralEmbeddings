@@ -8,6 +8,14 @@
 seed: null
 
 
+### Weights & Biases Integration ###
+
+
+wandb_mode: "online" # ["online", "offline", "disabled"]
+wandb_entity: "652_neural_embed_team"
+wandb_project: "neural-embeddings"
+
+
 ### Training ###
 
 

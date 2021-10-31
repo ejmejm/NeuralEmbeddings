@@ -34,8 +34,8 @@ def train(config: dict):
     """
     # Init wandb for logging
     wandb_config = to_wandb_format(config)
-    wandb.init(entity='652_neural_embed_team',
-        project='neural-embeddings', config=wandb_config)
+    wandb.init(entity=config['wandb_entity'],
+        project=config['wandb_project'], config=wandb_config)
 
     # Choose random seed if not provided
     if config['seed'] is None:

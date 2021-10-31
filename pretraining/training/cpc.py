@@ -170,7 +170,7 @@ def train_with_cpc(
                 val_losses = validate(model, bilinear_layers, val_loader, config)
                 print('Validation losses:')
                 # Log losses
-                log_losses(val_losses)
+                log_losses(val_losses, prefix='val_')
                 if cpc_config['scheduler_enabled']:
                     scheduler.step(np.mean(val_losses))
                 print()
