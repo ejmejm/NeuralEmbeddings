@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 
 from config_handling import load_config
 
+
 DATA_FILE_ENDING = '.pnd'
 METADATA_FILE_ENDING = '.pkl'
 
@@ -19,12 +20,10 @@ METADATA_FILE_ENDING = '.pkl'
 def min_max_normalize(x: Tensor, low: int = -1, high: int = 1):
     """
     Normalize a tensor between low and high.
-
     Args:
         x: Tensor to normalize.
         low: Lower bound.
         high: Upper bound.
-
     Returns:
         Normalized tensor.
     """
@@ -42,55 +41,91 @@ def min_max_normalize(x: Tensor, low: int = -1, high: int = 1):
     x += (high + low) / 2
     return (high - low) * x
 
-def load_raw_data(base_path: str, file_type: str = '.fif') -> List[List[mne.io.Raw]]:
+def load_raw_data(base_path: str, file_type: str = '.fif') -> List[List[str]]:
     """
     Loads raw data from a directory.
-
     Args:
         base_path: Path to the directory containing the raw data.
         file_type: File type of the raw data.
-
     Returns:
         List of lists of raw data.
     """
-    all_raw_data = list()
+    all_raw_data_paths = list()
     database_paths = [f.path for f in os.scandir(base_path) if f.is_dir()]
     
     for database_path in database_paths:
-        database_raw_data = list()
+        database_raw_data_paths = list()
         for dir_path, _, files in os.walk(database_path):
             for file in files:
                 if file.lower().endswith(file_type):
-                    raw_data = mne.io.read_raw_fif(os.path.join(dir_path, file), verbose=True, preload=True)
-                    database_raw_data.append(raw_data)
-        all_raw_data.append(database_raw_data)
+                    database_raw_data_paths.append(os.path.join(dir_path, file))
+        all_raw_data_paths.append(database_raw_data_paths)
     
-    return all_raw_data
+    return all_raw_data_paths
+
+
+def correct_data(file_path: str):
+    """
+    Split data
+    """
+    original_file_name = os.path.basename(file_path)
+    path = file_path.removesuffix(original_file_name)
+    new_path = path + "split_" + original_file_name
+    raw_data = mne.io.read_raw_fif(file_path, on_split_missing = "ignore", preload=True, verbose=True)
+    raw_data.save(fname=new_path, overwrite=False, split_size = "0.8GB")
+    
+    os.remove(file_path)
+    os.remove(new_path)
+   
+
+def correct_all_data(base_path: str, file_type: str = '.fif'):
+    """
+    Split any data that needs to be split (will otherwise cause error)
+    """
+
+    all_data_paths = load_raw_data(base_path, file_type)
+    all_data_paths = [raw_data for database in all_data_paths for raw_data in database]
+    
+    for raw_data_path in all_data_paths:
+        try:
+            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing = "raise", preload=True, verbose = True)
+        except ValueError:
+            print("Correcting and spliting data")
+            correct_data(raw_data_path)
+
+        del raw_data_path
 
 def preprocess_and_save_data(
-    all_raw_data: List[List[mne.io.Raw]],
+    all_raw_data_paths: List[List[str]],
     config: dict,
     output_dir: str,
     metadata_fn: str):
     """
     Preprocesses raw data and saves it to a file.
-
     Args:
         all_raw_data: List of lists of raw data.
         config: Configuration dictionary.
         output_dir: Directory to save the preprocessed data.
         metadata_fn: File name of the metadata file.
     """
-    all_data = [raw_data for database in all_raw_data for raw_data in database]
+    all_data_paths = [raw_data for database in all_raw_data_paths for raw_data in database]
     list_of_data_samples_sizes = list()
     
-    for idx, raw_data in enumerate(all_data):
+    for idx, raw_data_path in enumerate(all_data_paths):
+        # load raw data; skip any bad data (should)
+        try:
+            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing = "raise", preload=True, verbose = True)
+        except ValueError:
+            warnings.warn("Should not have skipped; check data again")
+            continue
+
         preprocessed_data = preprocess_data(raw_data, config)
        
         list_of_data_samples_sizes.append(preprocessed_data.shape[0])
-    
+
+
         torch.save(preprocessed_data, f'{output_dir}/run_{idx}' + DATA_FILE_ENDING)
-        
+
     metadata_path = os.path.join(output_dir, metadata_fn + METADATA_FILE_ENDING)
     with open(metadata_path, 'wb') as filehandle:
         pickle.dump(list_of_data_samples_sizes, filehandle)
@@ -145,7 +180,6 @@ def preprocess_data(data: mne.io.Raw, config: dict) -> pd.DataFrame:
         data = min_max_normalize(data)
         
     return data
-
 
 class BatchTensorDataset(Dataset):
     """

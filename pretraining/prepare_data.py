@@ -2,7 +2,7 @@ import argparse
 import os
 
 from config_handling import load_config
-from data_loading import load_raw_data, preprocess_and_save_data
+from data_loading import load_raw_data, preprocess_and_save_data, correct_all_data
 
 
 parser = argparse.ArgumentParser()
@@ -26,6 +26,9 @@ if __name__ == '__main__':
     train_dir = os.path.join(base_dir, config['train_dir'])
     output_dir = os.path.join(base_dir, config['train_val_preprocessed'])
 
+    print('Fixing train split issues...')
+    correct_all_data(train_dir, file_type)
+
     print('Loading train data...')
     train_data = load_raw_data(train_dir, file_type)
     preprocess_and_save_data(train_data, config, output_dir, metadata_fn)
@@ -34,6 +37,9 @@ if __name__ == '__main__':
     metadata_fn = config['test_info']
     test_dir = os.path.join(base_dir, config['test_dir'])
     output_dir = os.path.join(base_dir, config['test_preprocessed'])
+
+    print('Fixing test split issues...')
+    correct_all_data(test_dir, file_type)
 
     print('Loading test data...')
     test_data = load_raw_data(test_dir, file_type)
