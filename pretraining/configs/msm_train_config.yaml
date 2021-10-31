@@ -25,9 +25,6 @@ msm_params:
   mask_prob: 0.1
   min_mask_len: 2
   max_mask_len: 4
-  
-  # Whether or not to shuffle the samples within a batch
-  shuffle_in_batch: True
 
   # These learning rates are overwriten by the global
   # lr if not defined or null
@@ -36,9 +33,6 @@ msm_params:
   calib_lr: 0.001
   scheduler_enabled: True
   phase_decay: 0.1
-  
-cpc_params:
-  wip: True
 
 
 ### Data ###
@@ -55,6 +49,8 @@ calibration_unit_size: 2048
 # Total sequential points per batch =
 # batch_size * primary_unit_size + calibration_unit_size
 batch_size: 8
+# Whether or not to shuffle the samples within a batch
+shuffle_in_batch: True
 
 val_split: 0.02 # Percentage of data used for validation
 # test_split is currently not being used

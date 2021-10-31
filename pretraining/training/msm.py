@@ -439,7 +439,7 @@ def train_with_msm(
             calib_input = data['calibration_input'].to(config['device'])
 
             # Shuffle the primary input
-            if msm_config['shuffle_in_batch']:
+            if config['shuffle_in_batch']:
                 primary_input = primary_input[torch.randperm(primary_input.shape[0])]
             
             # Create primary masks

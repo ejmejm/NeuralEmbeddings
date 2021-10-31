@@ -284,6 +284,10 @@ class NeuroSignalEncoder(nn.Module):
         else:
             self.mc_encoder = None
 
+        # LSTM head used for summarizing the outputs
+        # Can be added after initialization of the model
+        self.lstm_head = None
+
         # Register index tensors as buffers
         # This way, their devices will be updated with the model's device
         for token, idx in TOKEN_TO_IDX.items():
@@ -391,6 +395,21 @@ class NeuroSignalEncoder(nn.Module):
 
         return embeds
 
+    def add_lstm_head(self, output_dim: int) -> None:
+        """
+        Add an LSTM head to the model.
+        This is required for CPC, and optional when
+        training downstream tasks.
+
+        Args:
+            output_dim: dimension of the LSTM head output.
+        """
+        self.lstm_head = nn.LSTM(
+            input_size = self.config['embedding_dim'],
+            hidden_size = output_dim,
+            num_layers = 1,
+            batch_first = True)
+
     def forward(
         self,
         primary_input: Tensor,
@@ -444,8 +463,11 @@ class NeuroSignalEncoder(nn.Module):
             # The rearranging makes training easier later
             calib_return_embeds = rearrange(calib_embeds,
                 '(b c) s e -> b s c e', c=n_channels)
-            calib_targets = rearrange(calib_outputs['targets'],
-                '(b c) s e -> b s c e', c=n_channels)
+            
+            calib_targets = calib_outputs['targets']
+            if calib_targets is not None:
+                calib_targets = rearrange(calib_targets,
+                    '(b c) s e -> b s c e', c=n_channels)
 
             # Note: calibration input and primary input batches are currently not aligned
             # All calibration batches are combined sequentially and prepended to all primary batches
@@ -476,8 +498,11 @@ class NeuroSignalEncoder(nn.Module):
             # The rearranging makes training easier later
             sc_return_embeds = rearrange(sc_embeds,
                 '(b c) s e -> b s c e', c=n_channels)
-            sc_targets = rearrange(sc_outputs['targets'],
-                '(b c) s e -> b s c e', c=n_channels)
+                
+            sc_targets = sc_outputs['targets']
+            if sc_targets is not None:
+                sc_targets = rearrange(sc_targets,
+                    '(b c) s e -> b s c e', c=n_channels)
 
             format_hook = None # Make sure it doesn't get used again for mc encoder
         else:
@@ -506,10 +531,22 @@ class NeuroSignalEncoder(nn.Module):
             mc_embeds = None
             mc_targets = None
 
+        ### LSTM head ###
+
+        if self.lstm_head is not None:
+            # Run the embeddings through the LSTM head
+            lstm_embeds, lstm_hidden = self.lstm_head(output_embeds)
+        else:
+            lstm_embeds = None
+            lstm_hidden = None
+
         ### Returns ###
 
         return {
-            'embeddings': output_embeds, # Final embeddings
+            # Final embeddings of shape (batch_size, seq_len, embed_dim)
+            'embeddings': output_embeds,
+            'lstm_embeddings': lstm_embeds,
+            'lstm_hidden': lstm_hidden,
             'mc_embeddings': mc_embeds,
             'mc_targets': mc_targets,
             'sc_embeddings': sc_return_embeds,

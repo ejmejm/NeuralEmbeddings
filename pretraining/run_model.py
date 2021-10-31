@@ -9,6 +9,7 @@ from config_handling import load_config, to_wandb_format
 from data_loading import prepare_dataloaders
 from models import NeuroSignalEncoder
 from training.msm import train_with_msm
+from training.cpc import train_with_cpc
 
 ### Create argparser for command line arguments ###
 
@@ -29,11 +30,12 @@ parser.set_defaults(gen_data=False, train=True, test=False)
 
 def train(config: dict):
     """
-    Train the model.    
+    Train the model.
     """
     # Init wandb for logging
     wandb_config = to_wandb_format(config)
-    wandb.init(project='neural-embeddings', config=wandb_config)
+    wandb.init(entity='652_neural_embed_team',
+        project='neural-embeddings', config=wandb_config)
 
     # Choose random seed if not provided
     if config['seed'] is None:
@@ -52,11 +54,21 @@ def train(config: dict):
 
     # Create the model
     model = NeuroSignalEncoder(model_config)
+    # Add an LSTM head if CPC is being used
+    if config['train_method'].lower() == 'cpc':
+        cpc_config = config['cpc_params']
+        model.add_lstm_head(cpc_config['embedding_dim'])
     model = model.to(config['device'])
     wandb.watch(model, log_freq=100)
 
     # Train the model
-    train_with_msm(model, config, train_loader, val_loader)
+    if config['train_method'].lower() == 'msm':
+        train_with_msm(model, config, train_loader, val_loader)
+    elif config['train_method'].lower() == 'cpc':
+        train_with_cpc(model, config, train_loader, val_loader)
+    else:
+        raise ValueError('Train method "{}" not recognized.'\
+            .format(config['train_method']))
 
     # Save the model
     save_path = os.path.join(base_dir, model_config['save_path'])
