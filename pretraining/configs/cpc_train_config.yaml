@@ -67,9 +67,9 @@ common_sfreq: 1000.0
 high_pass_cut_off: 0.1
 
 # Only one of standardization and normalization can be used
-use_standardization: False
-use_normalization: True
-use_high_pass_filter: False
+use_standardization: True
+use_normalization: False
+use_high_pass_filter: True
 
 # ICA
 use_ica: False

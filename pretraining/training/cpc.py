@@ -125,7 +125,10 @@ def train_with_cpc(
         for batch_idx, data in enumerate(train_loader):
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
-            calib_input = data['calibration_input'].to(config['device'])
+            if model.calibration_model is not None:
+                calib_input = data['calibration_input'].to(config['device'])
+            else:
+                calib_input = None
 
             # Shuffle the primary input
             if config['shuffle_in_batch']:
@@ -193,7 +196,10 @@ def validate(model: NeuroSignalEncoder, bilinear_layers: List[nn.Module],
         for data in val_loader:
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
-            calib_input = data['calibration_input'].to(config['device'])
+            if model.calibration_model is not None:
+                calib_input = data['calibration_input'].to(config['device'])
+            else:
+                calib_input = None
 
             # Run model
             output_dict = model(primary_input, calibration_input=calib_input)

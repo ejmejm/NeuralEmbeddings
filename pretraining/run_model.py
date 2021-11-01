@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import wandb
 
-from config_handling import load_config, to_wandb_format
+from config_handling import load_config, to_wandb_format, validate_config
 from data_loading import prepare_dataloaders
 from models import NeuroSignalEncoder
 from training.msm import train_with_msm
@@ -95,6 +95,7 @@ if __name__ == '__main__':
 
     # Load the config file
     config = load_config(config_path)
+    validate_config(config)
     model_config = config['model']
 
     # Train the model

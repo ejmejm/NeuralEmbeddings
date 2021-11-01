@@ -99,6 +99,46 @@ def from_wandb_format(config: dict) -> dict:
             wandb_config[key] = value
     return wandb_config
 
+def validate_config(config: dict):
+    """
+    Validates whether the config is formatted correctly or not.
+    Does not check everything, but specifically cases where two
+    values are not compatible.
+
+    Args:
+        config: The config in nested dict format.
+    
+    Throws:
+        ValueError: If the config is not formatted correctly.
+    """
+    if config['train_method'].lower() == 'msm' and \
+       config['msm_params'] is None:
+        raise ValueError('MSM params must be specified for MSM training.')
+    if config['train_method'].lower() == 'cpc' and \
+       config['cpc_params'] is None:
+        raise ValueError('CPC params must be specified for CPC training.')
+
+    if config['train_method'].lower() == 'msm' and \
+       config['msm_params']['min_mask_len'] > \
+       config['msm_params']['max_mask_len']:
+        raise ValueError('The minimum mask length must be less than or ' + \
+            'equal to the maximum mask length.')
+
+    if config['use_standardization'] and \
+       config['use_normalization']:
+        raise ValueError('Standardization and normalization cannot be ' + \
+            'used at the same time.')
+
+    model_config = config['model']
+    if not model_config['single_channel_module']['enabled'] and \
+       not model_config['mixed_channel_module']['enabled']:
+        raise ValueError('At least one primary encoder module must be enabled.')
+
+    if not model_config['single_channel_module']['enabled'] and \
+       model_config['calibration_module']['enabled']:
+        raise ValueError('Calibration module cannot be enabled without ' + \
+            'a single channel module.')
+
 if __name__ == '__main__':
     # Get absolute path of the this directory
     curr_dir = os.path.dirname(os.path.abspath(__file__))

@@ -5,16 +5,18 @@ import numpy as np
 import torch
 import wandb
 
-from config_handling import load_config, to_wandb_format
+from config_handling import load_config, validate_config
 from config_handling import to_wandb_sweep_format, from_wandb_format
 from data_loading import prepare_dataloaders
 from models import NeuroSignalEncoder
 from training.msm import train_with_msm
+from training.cpc import train_with_cpc
 
 ### Create argparser for command line arguments ###
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', type=str, default='configs/sweeps/test_sweep_config.yaml')
+parser.add_argument('-s', '--sweep_id', type=str, default=None)
 
 ### Main ###
 
@@ -25,6 +27,9 @@ def run_sweep_iteration():
     with wandb.init() as _:
         # Get sweep iteration config
         config = from_wandb_format(wandb.config)
+        validate_config(config)
+            
+        model_config = config['model_config']
 
         # Choose random seed if not provided
         if config['seed'] is None:
@@ -43,14 +48,20 @@ def run_sweep_iteration():
 
         # Create the model
         model = NeuroSignalEncoder(model_config)
+        if config['train_method'].lower() == 'cpc':
+            cpc_config = config['cpc_params']
+            model.add_lstm_head(cpc_config['embedding_dim'])
         model = model.to(config['device'])
         wandb.watch(model, log_freq=100)
 
         # Train the model
         if config['train_method'].lower() == 'msm':
             train_with_msm(model, config, train_loader, val_loader)
+        elif config['train_method'].lower() == 'cpc':
+            train_with_cpc(model, config, train_loader, val_loader)
         else:
-            raise ValueError('Unknown train method: "{}"'.format(config['train_method']))
+            raise ValueError('Train method "{}" not recognized.'\
+                .format(config['train_method']))
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -61,11 +72,13 @@ if __name__ == '__main__':
 
     # Load the config file
     config = load_config(config_path)
-    model_config = config['model']
 
-    # Init wandb for sweep
-    sweep_config = to_wandb_sweep_format(config)
-    sweep_id = wandb.sweep(sweep_config, project='neural-embeddings')
+    if args.sweep_id is None:
+        # Init wandb for sweep
+        wandb_config = to_wandb_sweep_format(config)
+        sweep_id = wandb.sweep(wandb_config, project='neural-embeddings')
+    else:
+        sweep_id = args.sweep_id
 
     # Run a sweep agent
     # TODO: Need to get right config for the sweep iteration

@@ -157,8 +157,8 @@ def calculate_embed_std(
         'calib_embed_std': [] if model.calibration_model is not None else None
     }
 
-    # Perform with 3 different masks
-    for _ in range(3):
+    # Perform with 2 different masks
+    for _ in range(2):
         # Create primary masks
         primary_mask_shape = (primary_input.shape[0], model.embed_seq_len)
         sc_mask = generate_mask(primary_mask_shape, msm_config, device=config['device'])
@@ -169,14 +169,15 @@ def calculate_embed_std(
         if model.calibration_model is not None:
             calib_mask_shape = (calib_input.shape[0], model.calib_embed_seq_len)
             calib_mask = generate_mask(calib_mask_shape, msm_config, device=config['device'])
-        else:
-            calib_input = None
 
 
         first_iter = True
         for data in data_loader:
             primary_input = data['primary_input'].to(config['device'])
-            calib_input = data['calibration_input'].to(config['device'])
+            if model.calibration_model is not None:
+                calib_input = data['calibration_input'].to(config['device'])
+            else:
+                calib_input = None
             
             # Run model
             output_dict = model(

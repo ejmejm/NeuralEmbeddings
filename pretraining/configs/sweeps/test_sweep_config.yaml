@@ -52,7 +52,6 @@ msm_params:
   
 cpc_params:
   embedding_dim: 64
-  lstm_dropout: 0.2
   n_pred_steps: 2
   scheduler_enabled: True
 
