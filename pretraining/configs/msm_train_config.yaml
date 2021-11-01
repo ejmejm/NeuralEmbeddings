@@ -46,7 +46,7 @@ msm_params:
 ### Data ###
 
 
-data_type: "MEG" # Valid values: [MEG, EEG]
+data_type: "grad" # Valid values: [MEG, EEG, grad, mag]
 
 # Number of samples = unit size * batch size
 # seq_unit_size: 2048

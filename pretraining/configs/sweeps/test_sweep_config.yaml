@@ -19,14 +19,21 @@ count: 5
 # The outcome is deterministic given a seed
 seed: null
 
+### Weights & Biases Integration ###
+
+wandb_mode: "offline" # ["online", "offline", "disabled"]
+wandb_entity: "652_neural_embed_team"
+wandb_project: "neural-embeddings"
+
 ### Training ###
 
-train_epochs: 2
-learning_rate: [0.001, 0.0001]
-log_interval: 16
+train_epochs: 4
+learning_rate: 0.001
+log_interval: 4
+val_interval: 16
 device: "cuda"
 
-train_method: "MSM"
+train_method: "CPC"
 
 # The method params only need to be defined
 # for the method being used
@@ -34,31 +41,69 @@ msm_params:
   mask_prob: 0.1
   min_mask_len: 2
   max_mask_len: 4
+
+  # These learning rates are overwriten by the global
+  # lr if not defined or null
+  sc_lr: 0.001
+  mc_lr: 0.001
+  calib_lr: 0.001
+  scheduler_enabled: True
+  phase_decay: 0.1
   
 cpc_params:
-  wip: True
-
-swav_params:
-  wip: True
-
+  embedding_dim: 64
+  lstm_dropout: 0.2
+  n_pred_steps: 2
+  scheduler_enabled: True
 
 ### Data ###
 
-data_type: "MEG" # Valid values: [MEG, EEG]
+data_type: "grad" # Valid values: [MEG, EEG, grad, mag]
 
 # Number of samples = unit size * batch size
 # seq_unit_size: 2048
 # The number of sequential points that are sampled for a single example
-primary_unit_size: 512
-calibration_unit_size: 1024
+primary_unit_size: 1024
+calibration_unit_size: 2048
 
 # Total sequential points per batch =
 # batch_size * primary_unit_size + calibration_unit_size
-batch_size: 2
+batch_size: 4
+# Whether or not to shuffle the samples within a batch
+shuffle_in_batch: True
 
-
-val_split: 0.05 # Percentage of data used for validation
+val_split: 0.02 # Percentage of data used for validation
+# test_split is currently not being used
 test_split: 0.15 # Percentage of data used for testing
+
+### Preprocessing ###
+
+data_file_type: ".fif"
+
+train_dir: "data/small_train_datasets"
+test_dir: "data/small_test_datasets"
+
+common_sfreq: 1000.0
+high_pass_cut_off: 0.1
+
+# Only one of standardization and normalization can be used
+use_standardization: False
+use_normalization: True
+use_high_pass_filter: False
+
+# ICA
+use_ica: False
+ica:
+  n_components: 0.95
+  max_iter: 500
+
+# Save paths for preprocessed data
+train_val_preprocessed: "data/small_train_preprocessed"
+test_preprocessed: "data/small_test_preprocessed"
+
+# Save filename for metadata (wihout filetype)
+train_val_info: "dataset_info"
+test_info: "dataset_info"
 
 
 ### Model ###
@@ -67,9 +112,9 @@ test_split: 0.15 # Percentage of data used for testing
 model:
   save_path: "../models/test_model.pt"
 
-  max_primary_input_len: 512
-  max_calibration_input_len: 1024
-  embedding_dim: 16
+  max_primary_input_len: 1024
+  max_calibration_input_len: 2048
+  embedding_dim: 32
   channel_combine_func: "mean" # Valid values: [mean, logsumexp]
 
   ### Primary Model ###
@@ -79,28 +124,28 @@ model:
     enabled: True
 
     # Conv
-    filter_size: 32
-    stride: 16
+    filter_size: 100
+    stride: 75
 
     # Transformer
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
-    feedforward_dim: 256
+    feedforward_dim: 128
 
   # Mixed channel module parameters
   mixed_channel_module:
     enabled: True
 
     # Conv (NOT USED unless the single channel module is disabled)
-    filter_size: 32
-    stride: 16
+    filter_size: 100
+    stride: 75
 
     # Transformer
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
-    feedforward_dim: 256
+    feedforward_dim: 128
 
   ### Calibration Model ###
   
@@ -109,11 +154,11 @@ model:
     enabled: True
 
     # Conv
-    filter_size: 64
-    stride: 32
+    filter_size: 100
+    stride: 75
 
     # Transformer
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
-    feedforward_dim: 256
+    feedforward_dim: 128

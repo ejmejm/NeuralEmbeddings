@@ -102,8 +102,15 @@ def preprocess_data(data: mne.io.Raw, config: dict) -> pd.DataFrame:
     # Only include MEG data
     if config['data_type'].lower() == 'meg':
         data = data.pick_types(meg=True)
+    elif config['data_type'].lower() == 'grad':
+        # Gets MEG gradiometers
+        data = data.pick_types(meg='grad')
+    elif config['data_type'].lower() == 'mag':
+        # Gets MEG magnetometers
+        data = data.pick_types(meg='mag')
     elif config['data_type'].lower() == 'eeg':
-        data = data.pick_types(eeg=True)
+        # data = data.pick_types(eeg=True)
+        raise NotImplementedError('EEG data not supported yet.')
     else:
         raise ValueError(f'Invalid data type: {config["data_type"]}')
 
@@ -130,14 +137,9 @@ def preprocess_data(data: mne.io.Raw, config: dict) -> pd.DataFrame:
 
     # Standardization vs. Normalization
     if config['use_standardization']:
-        # requires epoched data
-        # scaler = Scaler(scalings='mean')
-        # data_df = scaler.fit_transform(data_df)
-
         scaler = StandardScaler()
         data = scaler.fit_transform(data)
         data = torch.from_numpy(data.values).float()
-
     elif config['use_normalization']:
         data = torch.from_numpy(data.values).float()
         data = min_max_normalize(data)

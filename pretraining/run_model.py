@@ -40,11 +40,11 @@ def train(config: dict):
     # Choose random seed if not provided
     if config['seed'] is None:
         config['seed'] = np.random.randint(0, 2**31)
+        wandb.config.update({'seed': config['seed']}, True)
 
     # Set and log seed
     np.random.seed(config['seed'])
     torch.manual_seed(config['seed'])
-    wandb.log({'seed': config['seed']})
     print('seed:', config['seed'])
 
     # Prepare the data

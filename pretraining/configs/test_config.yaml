@@ -7,17 +7,13 @@
 
 seed: null
 
-
 ### Weights & Biases Integration ###
-
 
 wandb_mode: "offline" # ["online", "offline", "disabled"]
 wandb_entity: "652_neural_embed_team"
 wandb_project: "neural-embeddings"
 
-
 ### Training ###
-
 
 train_epochs: 4
 learning_rate: 0.001
@@ -48,11 +44,9 @@ cpc_params:
   n_pred_steps: 2
   scheduler_enabled: True
 
-
 ### Data ###
 
-
-data_type: "MEG" # Valid values: [MEG, EEG]
+data_type: "grad" # Valid values: [MEG, EEG, grad, mag]
 
 # Number of samples = unit size * batch size
 # seq_unit_size: 2048
@@ -66,14 +60,11 @@ batch_size: 4
 # Whether or not to shuffle the samples within a batch
 shuffle_in_batch: True
 
-
 val_split: 0.02 # Percentage of data used for validation
 # test_split is currently not being used
 test_split: 0.15 # Percentage of data used for testing
 
-
 ### Preprocessing ###
-
 
 data_file_type: ".fif"
 
