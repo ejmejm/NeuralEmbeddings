@@ -3,12 +3,14 @@ import pickle
 from typing import List
 
 import mne
+import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import warnings
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, random_split
+from tqdm import tqdm
 
 from config_handling import load_config
 
@@ -63,7 +65,6 @@ def load_raw_data(base_path: str, file_type: str = '.fif') -> List[List[str]]:
     
     return all_raw_data_paths
 
-
 def correct_data(file_path: str):
     """
     Split data
@@ -88,9 +89,9 @@ def correct_all_data(base_path: str, file_type: str = '.fif'):
     
     for raw_data_path in all_data_paths:
         try:
-            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing = "raise", preload=True, verbose = True)
+            mne.io.read_raw_fif(raw_data_path, on_split_missing = 'raise', preload=True, verbose = True)
         except ValueError:
-            print("Correcting and spliting data")
+            print('Correcting and spliting data')
             correct_data(raw_data_path)
 
         del raw_data_path
@@ -102,6 +103,7 @@ def preprocess_and_save_data(
     metadata_fn: str):
     """
     Preprocesses raw data and saves it to a file.
+
     Args:
         all_raw_data: List of lists of raw data.
         config: Configuration dictionary.
@@ -110,19 +112,40 @@ def preprocess_and_save_data(
     """
     all_data_paths = [raw_data for database in all_raw_data_paths for raw_data in database]
     list_of_data_samples_sizes = list()
-    
-    for idx, raw_data_path in enumerate(all_data_paths):
+
+    # Sample some of the data for fitting the preprocessing models
+    n_fit_samples = min(config['preprocess_fit_samples'], len(all_data_paths))
+    print(f'Using {n_fit_samples} samples for fitting preprocessing models')
+    fit_data_paths = np.random.choice(all_data_paths, n_fit_samples, False)
+
+    print('Loading data for fitting preprocessing models...')
+    fit_samples = []
+    for raw_data_path in tqdm(fit_data_paths):
         # load raw data; skip any bad data (should)
         try:
-            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing = "raise", preload=True, verbose = True)
+            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing='raise',
+                preload=True, verbose=False)
+            fit_samples.append(raw_data)
         except ValueError:
-            warnings.warn("Should not have skipped; check data again")
+            warnings.warn('Should not have skipped; check data again')
+            continue
+    
+    # Learn the needed preprocessing models
+    print('Fitting preprocessing models...')
+    learn_preprocessors(fit_samples, config)
+
+    print('Preprocessing...')
+    for idx, raw_data_path in enumerate(tqdm(all_data_paths)):
+        # load raw data; skip any bad data (should)
+        try:
+            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing='raise',
+                preload=True, verbose=False)
+        except ValueError:
+            warnings.warn('Should not have skipped; check data again')
             continue
 
         preprocessed_data = preprocess_data(raw_data, config)
-       
         list_of_data_samples_sizes.append(preprocessed_data.shape[0])
-
 
         torch.save(preprocessed_data, f'{output_dir}/run_{idx}' + DATA_FILE_ENDING)
 
@@ -132,10 +155,19 @@ def preprocess_and_save_data(
 
     print('list_of_data_samples_sizes:', list_of_data_samples_sizes)
 
+def select_target_data(data: mne.io.Raw, config: dict) -> mne.io.Raw:
+    """
+    Selects the target type of data given the config.
 
-def preprocess_data(data: mne.io.Raw, config: dict) -> pd.DataFrame:
-    # Only include MEG data
+    Args:
+        data: Raw data.
+        config: Config dictionary.
+
+    Returns:
+        Raw data of the target type.
+    """
     if config['data_type'].lower() == 'meg':
+        # Only include MEG data
         data = data.pick_types(meg=True)
     elif config['data_type'].lower() == 'grad':
         # Gets MEG gradiometers
@@ -149,6 +181,75 @@ def preprocess_data(data: mne.io.Raw, config: dict) -> pd.DataFrame:
     else:
         raise ValueError(f'Invalid data type: {config["data_type"]}')
 
+    return data
+
+def learn_preprocessors(data: List[mne.io.Raw], config: dict):
+    """
+    The function creates preprocessors specified in the config
+    and fits them to a random sample of data.
+    They are then saved for later use.
+
+    Args:
+        data: Raw data.
+        config: Configuration dictionary.
+        n_batches: Number of batches to use for fitting.
+    """
+    if len(data) == 0:
+        raise ValueError('No data to fit preprocessors to.')
+
+    for i in range(len(data)):
+        # Get the specific channels of interest
+        data[i] = select_target_data(data[i], config)
+        # Resample and run the data through a high-pass filter
+        data[i] = apply_model_free_preprocessing(data[i], config)
+
+    if len(data) == 1:
+        data = data[0]
+    else:
+        full_data = mne.concatenate_raws(data)
+    preprocessing_models = {'ica': None, 'scaler': None}
+
+    # ICA
+    if config['use_ica']:
+        ica_config = config['ica']
+        ica = mne.preprocessing.ICA(n_components=ica_config['n_components'], \
+            random_state=config['seed'], max_iter=ica_config['max_iter'])
+        ica.fit(full_data)
+        full_data = ica.apply(full_data)
+        preprocessing_models['ica'] = ica
+    
+    full_data = full_data.to_data_frame()
+    full_data.drop(['time'], axis=1, inplace=True)
+    full_data = full_data.values
+
+    # Standardization
+    if config['use_standardization']:
+        scaler = StandardScaler()
+        # Reshape to -1 so all channel samples are scaled together,
+        # otherwise each channel would be scaled independently
+        flat_data = scaler.fit_transform(full_data.reshape(-1, 1))
+        full_data = flat_data.reshape(full_data.shape)
+        preprocessing_models['scaler'] = scaler
+        
+    base_dir = os.path.dirname(__file__)
+    model_path = os.path.join(base_dir, config['preprocessed_model_path'])
+    with open(model_path, 'wb') as f:
+        pickle.dump(preprocessing_models, f)
+
+    return preprocessing_models
+
+def apply_model_free_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Raw:
+    """
+    Applys preprocessing steps that don't require learning
+    a model of the data.
+
+    Args:
+        data: Raw data of selected channels.
+        config: Config dictionary.
+
+    Returns:
+        Partially preprocessed data.
+    """
     # Note: Unlike EEG, MEG always (at least for our datasets) uses a sfreq of 1000.0 Hz
     if data.info['sfreq'] != config['common_sfreq']:
         warnings.warn('Data should have sfreq of 1000.0 Hz; Please check data')
@@ -158,27 +259,60 @@ def preprocess_data(data: mne.io.Raw, config: dict) -> pd.DataFrame:
     if config['use_high_pass_filter']:
         # Don't change from 0.1 Hz 
         # (see https://mne.tools/0.15/auto_tutorials/plot_background_filtering.html#high-pass-problems)
-        data = data.filter(l_freq=config['high_pass_cutoff'], h_freq=None, fir_design='firwin')
+        data = data.filter(l_freq=config['high_pass_cut_off'], h_freq=None, fir_design='firwin')
+
+    return data
+
+def apply_model_based_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Raw:
+    """
+    Applys preprocessing steps that require a learned model of the data.
+
+    Args:
+        data: Data after pass through model free preprocessing.
+        config: Config dictionary.
+
+    Returns:
+        Fully preprocessed data.
+    """
+    # Load preprocessing models
+    base_dir = os.path.dirname(__file__)
+    model_path = os.path.join(base_dir, config['preprocessed_model_path'])
+    with open(model_path, 'rb') as f:
+        preprocessing_models = pickle.load(f)
 
     # ICA code 
     if config['use_ica']:
-        ica_config = config['ica']
-        ica = mne.preprocessing.ICA(n_components=ica_config['n_components'], \
-            random_state=config['seed'], max_iter=ica_config['max_iter'])
-        ica.fit(data)
+        ica = preprocessing_models['ica']
         data = ica.apply(data)
     
     data = data.to_data_frame()
+    data.drop(['time'], axis=1, inplace=True)
+    data = data.values
 
-    # Standardization vs. Normalization
+    # Standardization vs. normalization
     if config['use_standardization']:
-        scaler = StandardScaler()
-        data = scaler.fit_transform(data)
-        data = torch.from_numpy(data.values).float()
+        scaler = preprocessing_models['scaler']
+        flat_data = scaler.transform(data.reshape(-1, 1))
+        data = flat_data.reshape(data.shape)
+        data = torch.from_numpy(data).float()
     elif config['use_normalization']:
-        data = torch.from_numpy(data.values).float()
-        data = min_max_normalize(data)
-        
+        # Taking it out because no time to make a class and saving it for downstream tasks
+        # Also no reason to believe it would perform better than the StandardScaler
+        # Could reimplement later
+        # data = torch.from_numpy(data.values).float()
+        # data = min_max_normalize(data)
+        raise NotImplementedError('Normalization not implemented yet.')
+
+    return data
+
+
+def preprocess_data(data: mne.io.Raw, config: dict) -> pd.DataFrame:
+    # Get the specific channels of interest
+    data = select_target_data(data, config)
+    # Resample and run the data through a high-pass filter
+    data = apply_model_free_preprocessing(data, config)
+    # ICA and normalization/scaling
+    data = apply_model_based_preprocessing(data, config)
     return data
 
 class BatchTensorDataset(Dataset):

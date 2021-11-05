@@ -26,21 +26,27 @@ if __name__ == '__main__':
     train_dir = os.path.join(base_dir, config['train_dir'])
     output_dir = os.path.join(base_dir, config['train_val_preprocessed'])
 
-    print('Fixing train split issues...')
-    correct_all_data(train_dir, file_type)
+    # print('Fixing train split issues...')
+    # correct_all_data(train_dir, file_type)
 
     print('Loading train data...')
     train_data = load_raw_data(train_dir, file_type)
-    preprocess_and_save_data(train_data, config, output_dir, metadata_fn)
+    if train_data is not None and len(train_data) > 0:
+        preprocess_and_save_data(train_data, config, output_dir, metadata_fn)
+    else:
+        print('No train data found!')
 
     # Load and process the test data
     metadata_fn = config['test_info']
     test_dir = os.path.join(base_dir, config['test_dir'])
     output_dir = os.path.join(base_dir, config['test_preprocessed'])
 
-    print('Fixing test split issues...')
-    correct_all_data(test_dir, file_type)
+    # print('Fixing test split issues...')
+    # correct_all_data(test_dir, file_type)
 
     print('Loading test data...')
     test_data = load_raw_data(test_dir, file_type)
-    preprocess_and_save_data(test_data, config, output_dir, metadata_fn)
+    if test_data is not None and len(test_data) > 0:
+        preprocess_and_save_data(test_data, config, output_dir, metadata_fn)
+    else:
+        print('No test data found.')
