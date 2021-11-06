@@ -16,7 +16,7 @@ def load_config(path: str) -> dict:
         The loaded config dictionary.
     """
     with open(path, 'r') as f:
-        return yaml.load(f)
+        return yaml.load(f, Loader=yaml.FullLoader)
 
 def to_wandb_sweep_format(config: dict) -> dict:
     """
@@ -94,10 +94,35 @@ def from_wandb_format(config: dict) -> dict:
                 if sub_key not in curr_dict:
                     curr_dict[sub_key] = {}
                 curr_dict = curr_dict[sub_key]
-            curr_dict[sub_keys[-1]] = value
+            if isinstance(value, dict) and 'value' in value:
+                curr_dict[sub_keys[-1]] = value['value']
+            else:
+                curr_dict[sub_keys[-1]] = value
+        elif isinstance(value, dict) and 'value' in value:
+            wandb_config[key] = value['value']
         else:
             wandb_config[key] = value
     return wandb_config
+
+def merge_configs(config: dict, default_config: dict,
+                  wandb_format: bool = False) -> dict:
+    """
+    Merges two configs, where the first takes precedence.
+
+    Args:
+        config: The config to merge over the default config.
+        default_config: The default config.
+        wandb_format: Whether the configs are in wandb format or not.
+    """
+    new_config = copy.deepcopy(default_config)
+    if wandb_format:
+        new_config.update(config)
+    else:
+        config = to_wandb_format(config)
+        new_config = to_wandb_format(new_config)
+        new_config.update(config)
+        new_config = from_wandb_format(new_config)
+    return new_config
 
 def validate_config(config: dict):
     """
@@ -138,6 +163,12 @@ def validate_config(config: dict):
        model_config['calibration_module']['enabled']:
         raise ValueError('Calibration module cannot be enabled without ' + \
             'a single channel module.')
+
+
+DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__),
+    'configs/default_config.yaml')
+DEFAULT_CONFIG = load_config(DEFAULT_CONFIG_PATH)
+
 
 if __name__ == '__main__':
     # Get absolute path of the this directory

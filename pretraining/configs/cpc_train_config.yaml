@@ -4,26 +4,16 @@
 ###                                       ###
 #############################################
 
-
 seed: null
-
 
 ### Weights & Biases Integration ###
 
-
 wandb_mode: "online" # ["online", "offline", "disabled"]
-wandb_entity: "652_neural_embed_team"
-wandb_project: "neural-embeddings"
-
 
 ### Training ###
 
-
-train_epochs: 15
+train_epochs: 10
 learning_rate: 0.001
-log_interval: 64
-val_interval: 512
-device: "cuda"
 
 train_method: "CPC"
 
@@ -32,118 +22,7 @@ cpc_params:
   n_pred_steps: 12
   scheduler_enabled: True
 
-
-### Data ###
-
-
-data_type: "grad" # Valid values: [MEG, EEG, grad, mag]
-
-# Number of samples = unit size * batch size
-# seq_unit_size: 2048
-# The number of sequential points that are sampled for a single example
-primary_unit_size: 1024
-calibration_unit_size: 2048
-
-# Total sequential points per batch =
-# batch_size * primary_unit_size + calibration_unit_size
-batch_size: 8
-# Whether or not to shuffle the samples within a batch
-shuffle_in_batch: True
-
-val_split: 0.02 # Percentage of data used for validation
-# test_split is currently not being used
-test_split: 0.15 # Percentage of data used for testing
-
-
-### Preprocessing ###
-
-
-data_file_type: ".fif"
-
-train_dir: "data/train_datasets"
-test_dir: "data/test_datasets"
-
-common_sfreq: 1000.0
-high_pass_cut_off: 0.1
-
-# Only one of standardization and normalization can be used
-use_standardization: True
-use_normalization: False
-use_high_pass_filter: True
-
-# ICA
-use_ica: False
-ica:
-  n_components: 0.95
-  max_iter: 500
-
-# Number of samples used to fit preprocessors
-preprocess_fit_samples: 5
-# Save path for preprocessed models
-preprocessed_model_path: "../models/main_preprocessors.pkl"
-
-# Save paths for preprocessed data
-train_val_preprocessed: "data/train_preprocessed"
-test_preprocessed: "data/test_preprocessed"
-
-# Save filename for metadata (wihout filetype)
-train_val_info: "dataset_info"
-test_info: "dataset_info"
-
-
 ### Model ###
-
 
 model:
   save_path: "../models/msm_model.pt"
-
-  max_primary_input_len: 1024
-  max_calibration_input_len: 2048
-  embedding_dim: 32
-  channel_combine_func: "mean" # Valid values: [mean, logsumexp]
-
-  ### Primary Model ###
-
-  # Single channel module params
-  single_channel_module:
-    enabled: True
-
-    # Conv
-    filter_size: 100
-    stride: 75
-
-    # Transformer
-    n_layers: 2
-    dropout: 0.4
-    n_head: 2 # N heads for the attention
-    feedforward_dim: 128
-
-  # Mixed channel module parameters
-  mixed_channel_module:
-    enabled: True
-
-    # Conv (NOT USED unless the single channel module is disabled)
-    filter_size: 100
-    stride: 75
-
-    # Transformer
-    n_layers: 2
-    dropout: 0.4
-    n_head: 2 # N heads for the attention
-    feedforward_dim: 128
-
-  ### Calibration Model ###
-  
-  # Calibration module params
-  calibration_module:
-    enabled: True
-
-    # Conv
-    filter_size: 100
-    stride: 75
-
-    # Transformer
-    n_layers: 2
-    dropout: 0.5
-    n_head: 2 # N heads for the attention
-    feedforward_dim: 32

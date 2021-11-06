@@ -6,6 +6,7 @@ import torch
 import wandb
 
 from config_handling import load_config, to_wandb_format, validate_config
+from config_handling import merge_configs, DEFAULT_CONFIG
 from data_loading import prepare_dataloaders
 from models import NeuroSignalEncoder
 from training.msm import train_with_msm
@@ -53,6 +54,7 @@ def train(config: dict):
     val_loader = dataloaders['val']
 
     # Create the model
+    model_config = config['model']
     model = NeuroSignalEncoder(model_config)
     # Add an LSTM head if CPC is being used
     if config['train_method'].lower() == 'cpc':
@@ -71,6 +73,7 @@ def train(config: dict):
             .format(config['train_method']))
 
     # Save the model
+    base_dir = os.path.dirname(__file__)
     save_path = os.path.join(base_dir, model_config['save_path'])
     torch.save(model.state_dict(), save_path)
 
@@ -82,21 +85,24 @@ def test(config: dict):
     """
     raise NotImplementedError()
 
-
-### Main ###
-
-
-if __name__ == '__main__':
-    args = parser.parse_args()
-
+def prepare_config(config_path: str):
     # Get the path of the config file in relation to this main.py file
     base_dir = os.path.dirname(__file__)
-    config_path = os.path.join(base_dir, args.config)
+    config_path = os.path.join(base_dir, config_path)
 
     # Load the config file
     config = load_config(config_path)
+    config = merge_configs(config, DEFAULT_CONFIG)
     validate_config(config)
-    model_config = config['model']
+
+    return config
+
+### Main ###
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+    # Load the config
+    config = prepare_config(args.config)
 
     # Train the model
     if args.train:

@@ -386,6 +386,8 @@ class BatchTensorDataset(Dataset):
                 self.batch_size, self.primary_unit_size, data.shape[1])
         }
 
+def get_first_element(x):
+    return x[0]
 
 def prepare_dataloaders(config):
     base_dir = os.path.dirname(__file__)
@@ -406,16 +408,16 @@ def prepare_dataloaders(config):
 
     # Removes the first dimension input tensors, Otherwise they are
     # always 1 because the dataloader batch size is always 1
-    collate_fn = lambda x: x[0]
+        
     dataloaders = {
         'train': DataLoader(
-            train_dataset, shuffle=True, collate_fn=collate_fn, num_workers=2) \
+            train_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
                 if len(train_dataset) > 0 else None,
         'val': DataLoader(
-            val_dataset, shuffle=True, collate_fn=collate_fn, num_workers=2) \
+            val_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
                 if len(val_dataset) > 0 else None,
         'test': DataLoader(
-            test_dataset,  shuffle=True, collate_fn=collate_fn, num_workers=2) \
+            test_dataset,  shuffle=True, collate_fn=get_first_element, num_workers=2) \
                 if len(test_dataset) > 0 else None
     }
 
