@@ -5,3 +5,4 @@ data/
 models/*.pt
 *.ipynb
 old_testing.py
+*.pkl

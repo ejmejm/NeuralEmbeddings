@@ -6,7 +6,6 @@
 
 ### TODO ###
 
-# Change scaler + normalizer to only happen once
 # Setup sweep config
 # Setup parameter validation
 # Setup testing
@@ -95,7 +94,7 @@ ica:
 # Number of samples used to fit preprocessors
 preprocess_fit_samples: 5
 # Save path for preprocessed models
-preprocessed_model_path: "../models/preprocessors.pkl"
+preprocessed_model_path: "../models/test_preprocessors.pkl"
 
 # Save paths for preprocessed data
 train_val_preprocessed: "data/small_train_preprocessed"

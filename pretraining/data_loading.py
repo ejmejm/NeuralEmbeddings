@@ -409,13 +409,13 @@ def prepare_dataloaders(config):
     collate_fn = lambda x: x[0]
     dataloaders = {
         'train': DataLoader(
-            train_dataset, shuffle=True, collate_fn=collate_fn) \
+            train_dataset, shuffle=True, collate_fn=collate_fn, num_workers=2) \
                 if len(train_dataset) > 0 else None,
         'val': DataLoader(
-            val_dataset, shuffle=True, collate_fn=collate_fn) \
+            val_dataset, shuffle=True, collate_fn=collate_fn, num_workers=2) \
                 if len(val_dataset) > 0 else None,
         'test': DataLoader(
-            test_dataset,  shuffle=True, collate_fn=collate_fn) \
+            test_dataset,  shuffle=True, collate_fn=collate_fn, num_workers=2) \
                 if len(test_dataset) > 0 else None
     }
 
