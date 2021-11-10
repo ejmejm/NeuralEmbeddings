@@ -7,11 +7,15 @@
 ### Sweep Params ###
 
 sweep:
-  method: "random"
+  method: "bayes"
   
   metric:
     name: "val_loss"
     goal: "minimize"
+
+  early_terminate:
+    type: "hyperband"
+    min_iter: 8
 
 # Number of sweep iterations
 count: 1
@@ -25,11 +29,13 @@ wandb_mode: "online" # ["online", "offline", "disabled"]
 
 ### Training ###
 
-train_epochs: 8
-learning_rate:
-  distribution: "log_uniform"
-  min: -9.210 # log(0.0001)
-  max: -4.605 # log(0.01)
+train_epochs: 3
+# Fraction to cutoff the run early
+epoch_early_cutoff: 0.3
+learning_rate: null
+  # distribution: "log_uniform"
+  # min: -9.210 # log(0.0001)
+  # max: -4.605 # log(0.01)
 
 train_method: "MSM"
 
@@ -56,15 +62,15 @@ msm_params:
   sc_lr:
     distribution: "log_uniform"
     min: -9.210 # log(0.0001)
-    max: -4.605 # log(0.01)
+    max: -5.298 # log(0.005)
   mc_lr:
     distribution: "log_uniform"
     min: -9.210 # log(0.0001)
-    max: -4.605 # log(0.01)
+    max: -5.298 # log(0.005)
   calib_lr:
     distribution: "log_uniform"
     min: -9.210 # log(0.0001)
-    max: -4.605 # log(0.01)
+    max: -5.298 # log(0.005)
   scheduler_enabled: True # [True, False]
   phase_decay: 0.1 # [0.5, 0.25, 0.1, 0.01]
 
@@ -85,7 +91,7 @@ calibration_unit_size: 5000
 # batch_size * primary_unit_size + calibration_unit_size
 batch_size:
   distribution: "q_uniform"
-  min: 1
+  min: 4
   max: 16
   q: 1
 # Whether or not to shuffle the samples within a batch
@@ -150,9 +156,9 @@ model:
     stride: 75
 
     # Transformer
-    n_layers: [1, 2, 3]
+    n_layers: [1, 2, 4]
     dropout: 0.4
-    n_head: [1, 2, 3] # N heads for the attention
+    n_head: [1, 2, 4] # N heads for the attention
     feedforward_dim: 64
       # distribution: "q_log_uniform"
       # min: 2.773 # log(16)

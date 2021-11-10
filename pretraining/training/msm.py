@@ -434,7 +434,16 @@ def train_with_msm(
     for epoch in range(config['train_epochs']):
         model.train()
         batch_losses = create_loss_map(config['model'])
+        n_batches = len(train_loader)
+        if 'epoch_early_cutoff' in config and \
+                config['epoch_early_cutoff'] is not None:
+            n_batches = int(n_batches * config['epoch_early_cutoff'])
+
         for batch_idx, data in enumerate(train_loader):
+            if batch_idx >= n_batches:
+                print('Stopping batch early for specified early cutoff')
+                break
+
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
             calib_input = data['calibration_input'].to(config['device'])
@@ -480,10 +489,10 @@ def train_with_msm(
             update_weights(optimizers, msm_losses)
 
             if (batch_idx + 1) % config['log_interval'] == 0 or \
-               (batch_idx + 1) == len(train_loader):
+               (batch_idx + 1) == n_batches:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
-                    epoch + 1, batch_idx + 1, len(train_loader.dataset),
-                    100. * (batch_idx + 1) / len(train_loader)))
+                    epoch + 1, batch_idx + 1, n_batches,
+                    100. * (batch_idx + 1) / n_batches))
                 print_loss_map(batch_losses)
 
             # Do validation at the end of each epoch
@@ -491,7 +500,7 @@ def train_with_msm(
             do_validation = val_loader is not None and \
                     (config['val_interval'] is not None and \
                     (batch_idx + 1) % config['val_interval'] == 0) or \
-                    (batch_idx + 1) == len(train_loader)
+                    (batch_idx + 1) == n_batches
             if do_validation:
                 val_losses = validate(model, val_loader, config)
                 print('Validation losses:')
