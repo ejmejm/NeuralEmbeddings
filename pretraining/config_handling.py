@@ -164,6 +164,19 @@ def validate_config(config: dict):
         raise ValueError('Calibration module cannot be enabled without ' + \
             'a single channel module.')
 
+def prepare_config(config_path: str, validate=True):
+    # Get the path of the config file in relation to this main.py file
+    base_dir = os.path.dirname(__file__)
+    config_path = os.path.join(base_dir, config_path)
+
+    # Load the config file
+    config = load_config(config_path)
+    config = merge_configs(config, DEFAULT_CONFIG)
+    if validate:
+        validate_config(config)
+
+    return config
+
 
 DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__),
     'configs/default_config.yaml')

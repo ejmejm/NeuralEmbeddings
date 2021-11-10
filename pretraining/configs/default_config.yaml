@@ -70,6 +70,9 @@ test_dir: "data/test_datasets"
 
 common_sfreq: 1000.0
 high_pass_cut_off: 0.1
+high_pass_filter_length: "auto"
+# In milliseconds because sample frequency is 1000 Hz
+min_recording_length: 33000
 
 # Only one of standardization and normalization can be used
 use_standardization: True

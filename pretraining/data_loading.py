@@ -1,4 +1,6 @@
+import glob
 import os
+from pathlib import Path
 import pickle
 from typing import List
 
@@ -89,7 +91,7 @@ def correct_all_data(base_path: str, file_type: str = '.fif'):
     
     for raw_data_path in all_data_paths:
         try:
-            mne.io.read_raw_fif(raw_data_path, on_split_missing = 'raise', preload=True, verbose = True)
+            mne.io.read_raw_fif(raw_data_path, on_split_missing='raise', preload=True, verbose=True)
         except ValueError:
             print('Correcting and spliting data')
             correct_data(raw_data_path)
@@ -100,7 +102,8 @@ def preprocess_and_save_data(
     all_raw_data_paths: List[List[str]],
     config: dict,
     output_dir: str,
-    metadata_fn: str):
+    metadata_fn: str,
+    fit_preprocessors: bool = True):
     """
     Preprocesses raw data and saves it to a file.
 
@@ -110,44 +113,75 @@ def preprocess_and_save_data(
         output_dir: Directory to save the preprocessed data.
         metadata_fn: File name of the metadata file.
     """
+    # Create the output directory if it does not exist
+    if not os.path.exists(output_dir):
+        print(f'Creating output directory: {output_dir}')
+        Path(output_dir).mkdir(parents=True)
+
+    # Clear output directory
+    print('Clearing output directory to make room for data...')
+    for f in glob.glob(os.path.join(output_dir, '*')):
+        os.remove(f)
+
+    if all_raw_data_paths is None or len(all_raw_data_paths) == 0:
+        warnings.warn(f'No raw data found in "{output_dir}".')
+
     all_data_paths = [raw_data for database in all_raw_data_paths for raw_data in database]
     list_of_data_samples_sizes = list()
 
-    # Sample some of the data for fitting the preprocessing models
-    n_fit_samples = min(config['preprocess_fit_samples'], len(all_data_paths))
-    print(f'Using {n_fit_samples} samples for fitting preprocessing models')
-    fit_data_paths = np.random.choice(all_data_paths, n_fit_samples, False)
+    if fit_preprocessors:
+        # Sample some of the data for fitting the preprocessing models
+        n_fit_samples = min(config['preprocess_fit_samples'], len(all_data_paths))
+        print(f'Using {n_fit_samples} samples for fitting preprocessing models')
+        fit_data_paths = np.random.choice(all_data_paths, len(all_data_paths), False)
 
-    print('Loading data for fitting preprocessing models...')
-    fit_samples = []
-    for raw_data_path in tqdm(fit_data_paths):
-        # load raw data; skip any bad data (should)
-        try:
-            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing='raise',
-                preload=True, verbose=False)
-            fit_samples.append(raw_data)
-        except ValueError:
-            warnings.warn('Should not have skipped; check data again')
-            continue
-    
-    # Learn the needed preprocessing models
-    print('Fitting preprocessing models...')
-    learn_preprocessors(fit_samples, config)
+        print('Loading data for fitting preprocessing models...')
+        fit_samples = []
+        with tqdm(total=n_fit_samples) as bar:
+            sample_idx = 0
+            while len(fit_samples) < n_fit_samples and sample_idx < len(fit_data_paths):
+                # load raw data; skip any bad data (should)
+                try:
+                    raw_data = mne.io.read_raw_fif(fit_data_paths[sample_idx],
+                        on_split_missing='raise', preload=True, verbose=False)
+                    sample_idx += 1
+
+                    if len(raw_data) < config['min_recording_length']:
+                        raise ValueError('Sample too small')
+                        
+                    fit_samples.append(raw_data)
+                    bar.update(1)
+                except ValueError:
+                    warnings.warn('Should not have skipped; check data again')
+                    sample_idx += 1
+                    continue
+        
+        # Learn the needed preprocessing models
+        print('Fitting preprocessing models...')
+        learn_preprocessors(fit_samples, config)
 
     print('Preprocessing...')
+    n_loaded = 0
     for idx, raw_data_path in enumerate(tqdm(all_data_paths)):
         # load raw data; skip any bad data (should)
         try:
-            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing='raise',
+            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing='warn',
                 preload=True, verbose=False)
-        except ValueError:
-            warnings.warn('Should not have skipped; check data again')
+        except ValueError as e:
+            warnings.warn(f'Skipping {raw_data_path} due to error: {e}')
+            continue
+
+        if len(raw_data) < config['min_recording_length']:
+            warnings.warn(f'Skipping sample {raw_data_path} because it is too short.')
             continue
 
         preprocessed_data = preprocess_data(raw_data, config)
         list_of_data_samples_sizes.append(preprocessed_data.shape[0])
 
+        n_loaded += 1
         torch.save(preprocessed_data, f'{output_dir}/run_{idx}' + DATA_FILE_ENDING)
+
+    print(f'Successfully preprocessed {n_loaded}/{len(all_data_paths)} runs.')
 
     metadata_path = os.path.join(output_dir, metadata_fn + METADATA_FILE_ENDING)
     with open(metadata_path, 'wb') as filehandle:
@@ -203,32 +237,42 @@ def learn_preprocessors(data: List[mne.io.Raw], config: dict):
         # Resample and run the data through a high-pass filter
         data[i] = apply_model_free_preprocessing(data[i], config)
 
-    if len(data) == 1:
-        data = data[0]
-    else:
-        full_data = mne.concatenate_raws(data)
+    # if len(data) == 1:
+    #     data = data[0]
+    # else:
+    #     full_data = mne.concatenate_raws(data)
     preprocessing_models = {'ica': None, 'scaler': None}
 
     # ICA
     if config['use_ica']:
-        ica_config = config['ica']
-        ica = mne.preprocessing.ICA(n_components=ica_config['n_components'], \
-            random_state=config['seed'], max_iter=ica_config['max_iter'])
-        ica.fit(full_data)
-        full_data = ica.apply(full_data)
-        preprocessing_models['ica'] = ica
-    
-    full_data = full_data.to_data_frame()
-    full_data.drop(['time'], axis=1, inplace=True)
-    full_data = full_data.values
+        # Taking this out for now for 2 reasons:
+        # 1. It is not clear how to apply ICA to multiple datasets
+        # 2. ICA is extremely slow
+
+        # ica_config = config['ica']
+        # ica = mne.preprocessing.ICA(n_components=ica_config['n_components'], \
+        #     random_state=config['seed'], max_iter=ica_config['max_iter'])
+        # ica.fit(full_data)
+        # full_data = ica.apply(full_data)
+        # preprocessing_models['ica'] = ica
+        
+        raise NotImplementedError('ICA has been disabled.')
 
     # Standardization
     if config['use_standardization']:
+        # Flatten the data for fitting
+        flat_data_batches = []
+        for x in data:
+            df = x.to_data_frame()
+            df.drop(['time'], axis=1, inplace=True)
+            vals = df.values.reshape(-1, 1)
+            flat_data_batches.append(vals)
+        flat_data = np.concatenate(flat_data_batches)
+
         scaler = StandardScaler()
         # Reshape to -1 so all channel samples are scaled together,
         # otherwise each channel would be scaled independently
-        flat_data = scaler.fit_transform(full_data.reshape(-1, 1))
-        full_data = flat_data.reshape(full_data.shape)
+        scaler.fit(flat_data)
         preprocessing_models['scaler'] = scaler
         
     base_dir = os.path.dirname(__file__)
@@ -259,7 +303,8 @@ def apply_model_free_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Raw
     if config['use_high_pass_filter']:
         # Don't change from 0.1 Hz 
         # (see https://mne.tools/0.15/auto_tutorials/plot_background_filtering.html#high-pass-problems)
-        data = data.filter(l_freq=config['high_pass_cut_off'], h_freq=None, fir_design='firwin')
+        data = data.filter(l_freq=config['high_pass_cut_off'], h_freq=None, fir_design='firwin',
+                           n_jobs=4, filter_length=config['high_pass_filter_length'])
 
     return data
 
@@ -277,13 +322,22 @@ def apply_model_based_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Ra
     # Load preprocessing models
     base_dir = os.path.dirname(__file__)
     model_path = os.path.join(base_dir, config['preprocessed_model_path'])
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f'Preprocessing model file not found: {model_path}')
+
     with open(model_path, 'rb') as f:
         preprocessing_models = pickle.load(f)
 
     # ICA code 
     if config['use_ica']:
-        ica = preprocessing_models['ica']
-        data = ica.apply(data)
+        # Taking this out for now for 2 reasons:
+        # 1. It is not clear how to apply ICA to multiple datasets
+        # 2. ICA is extremely slow
+
+        # ica = preprocessing_models['ica']
+        # data = ica.apply(data)
+        raise NotImplementedError('ICA has been disabled.')
     
     data = data.to_data_frame()
     data.drop(['time'], axis=1, inplace=True)
@@ -294,7 +348,6 @@ def apply_model_based_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Ra
         scaler = preprocessing_models['scaler']
         flat_data = scaler.transform(data.reshape(-1, 1))
         data = flat_data.reshape(data.shape)
-        data = torch.from_numpy(data).float()
     elif config['use_normalization']:
         # Taking it out because no time to make a class and saving it for downstream tasks
         # Also no reason to believe it would perform better than the StandardScaler
@@ -303,6 +356,7 @@ def apply_model_based_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Ra
         # data = min_max_normalize(data)
         raise NotImplementedError('Normalization not implemented yet.')
 
+    data = torch.from_numpy(data).float()
     return data
 
 
@@ -394,31 +448,41 @@ def prepare_dataloaders(config):
 
     train_data_path = os.path.join(base_dir, config['train_val_preprocessed'])
     train_metadata_path = os.path.join(train_data_path, config['train_val_info'] + METADATA_FILE_ENDING)
-    train_val_dataset = BatchTensorDataset(config, train_metadata_path, train_data_path)
+
+    # Check if the data and metadata paths/files exist, and load if it does
+    if os.path.exists(train_data_path) and os.path.exists(train_metadata_path):
+        train_val_dataset = BatchTensorDataset(config, train_metadata_path, train_data_path)
+        n_val_samples = int(config['val_split'] * len(train_val_dataset))
+        n_train_samples = len(train_val_dataset) - n_val_samples
+        train_dataset, val_dataset = random_split(
+            train_val_dataset, [n_train_samples, n_val_samples])
+    else:
+        warnings.warn('The training data or training metadata file does not exist. ' +
+                      'Skipping loading of the training data.')
+        train_dataset = None
+        val_dataset = None
 
     test_data_path = os.path.join(base_dir, config['test_preprocessed'])
     test_metadata_path = os.path.join(test_data_path, config['test_info'] + METADATA_FILE_ENDING)
-    test_dataset = BatchTensorDataset(config, test_metadata_path, test_data_path)
 
-    n_val_samples = int(config['val_split'] * len(train_val_dataset))
-    n_train_samples = len(train_val_dataset) - n_val_samples
-
-    train_dataset, val_dataset = random_split(
-        train_val_dataset, [n_train_samples, n_val_samples])
-
-    # Removes the first dimension input tensors, Otherwise they are
-    # always 1 because the dataloader batch size is always 1
+    # Check if the data and metadata paths/files exist, and load if it does
+    if os.path.exists(train_data_path) and os.path.exists(train_metadata_path):
+        test_dataset = BatchTensorDataset(config, test_metadata_path, test_data_path)
+    else:
+        warnings.warn('The testing data or testing metadata file does not exist. ' +
+                      'Skipping loading of the training data.')
+        test_dataset = None
         
     dataloaders = {
         'train': DataLoader(
             train_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
-                if len(train_dataset) > 0 else None,
+                if train_dataset is not None and len(train_dataset) > 0 else None,
         'val': DataLoader(
             val_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
-                if len(val_dataset) > 0 else None,
+                if val_dataset is not None and len(val_dataset) > 0 else None,
         'test': DataLoader(
             test_dataset,  shuffle=True, collate_fn=get_first_element, num_workers=2) \
-                if len(test_dataset) > 0 else None
+                if test_dataset is not None and len(test_dataset) > 0 else None
     }
 
     return dataloaders

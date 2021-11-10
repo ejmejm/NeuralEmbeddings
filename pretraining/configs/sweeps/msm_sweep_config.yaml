@@ -14,7 +14,7 @@ sweep:
     goal: "minimize"
 
 # Number of sweep iterations
-count: 50
+count: 1
 
 # The outcome is deterministic given a seed
 seed: null
@@ -22,53 +22,72 @@ seed: null
 ### Weights & Biases Integration ###
 
 wandb_mode: "online" # ["online", "offline", "disabled"]
-wandb_entity: "652_neural_embed_team"
-wandb_project: "neural-embeddings"
 
 ### Training ###
 
-train_epochs: 4
-learning_rate: 0.001
-log_interval: 4
-val_interval: 16
-device: "cuda"
+train_epochs: 8
+learning_rate:
+  distribution: "log_uniform"
+  min: -9.210 # log(0.0001)
+  max: -4.605 # log(0.01)
 
-train_method: "CPC"
+train_method: "MSM"
 
 # The method params only need to be defined
 # for the method being used
 msm_params:
   mask_prob: 0.1
+    # distribution: "uniform"
+    # min: 0.1
+    # max: 0.6
   min_mask_len: 2
+    # distribution: "q_uniform"
+    # min: 1
+    # max: 4
+    # q: 1
   max_mask_len: 4
+    # distribution: "q_uniform"
+    # min: 1
+    # max: 8
+    # q: 1
 
   # These learning rates are overwriten by the global
   # lr if not defined or null
-  sc_lr: 0.001
-  mc_lr: 0.001
-  calib_lr: 0.001
-  scheduler_enabled: True
-  phase_decay: 0.1
-  
-cpc_params:
-  embedding_dim: 64
-  lstm_dropout: 0.2
-  n_pred_steps: 2
-  scheduler_enabled: True
+  sc_lr:
+    distribution: "log_uniform"
+    min: -9.210 # log(0.0001)
+    max: -4.605 # log(0.01)
+  mc_lr:
+    distribution: "log_uniform"
+    min: -9.210 # log(0.0001)
+    max: -4.605 # log(0.01)
+  calib_lr:
+    distribution: "log_uniform"
+    min: -9.210 # log(0.0001)
+    max: -4.605 # log(0.01)
+  scheduler_enabled: True # [True, False]
+  phase_decay: 0.1 # [0.5, 0.25, 0.1, 0.01]
 
 ### Data ###
 
 data_type: "grad" # Valid values: [MEG, EEG, grad, mag]
 
 # Number of samples = unit size * batch size
-# seq_unit_size: 2048
 # The number of sequential points that are sampled for a single example
-primary_unit_size: 1024
-calibration_unit_size: 2048
+primary_unit_size: 1000
+calibration_unit_size: 5000
+  # distribution: "q_uniform"
+  # min: 1000
+  # max: 10000
+  # q: 1000
 
 # Total sequential points per batch =
 # batch_size * primary_unit_size + calibration_unit_size
-batch_size: 4
+batch_size:
+  distribution: "q_uniform"
+  min: 1
+  max: 16
+  q: 1
 # Whether or not to shuffle the samples within a batch
 shuffle_in_batch: True
 
@@ -80,48 +99,51 @@ test_split: 0.15 # Percentage of data used for testing
 
 data_file_type: ".fif"
 
-train_dir: "data/small_train_datasets"
-test_dir: "data/small_test_datasets"
+train_dir: "data/train_datasets"
+test_dir: "data/test_datasets"
 
 common_sfreq: 1000.0
 high_pass_cut_off: 0.1
 
 # Only one of standardization and normalization can be used
-use_standardization: False
-use_normalization: True
-use_high_pass_filter: False
+use_standardization: True # [True, False]
+use_normalization: False # [True, False]
+use_high_pass_filter: True
 
 # ICA
-use_ica: False
+use_ica: False # [True, False]
 ica:
   n_components: 0.95
   max_iter: 500
+  
+# Number of samples used to fit preprocessors
+preprocess_fit_samples: 5
+# Save path for preprocessed models
+preprocessed_model_path: "../models/msm_sweep_preprocessors.pkl"
 
+# TODO: Change to full data
 # Save paths for preprocessed data
-train_val_preprocessed: "data/small_train_preprocessed"
-test_preprocessed: "data/small_test_preprocessed"
-
-# Save filename for metadata (wihout filetype)
-train_val_info: "dataset_info"
-test_info: "dataset_info"
-
+train_val_preprocessed: "data/msm_sweep_train_preprocessed"
+test_preprocessed: "data/msm_sweep_test_preprocessed"
 
 ### Model ###
 
-
 model:
-  save_path: "../models/test_model.pt"
-
-  max_primary_input_len: 1024
-  max_calibration_input_len: 2048
+  max_primary_input_len: 1000 # Needs to be changes to primary unit size
+  # TODO: Change this to scale with calibration unit size
+  max_calibration_input_len: 5000 # Needs to be changed to calibration unit size
   embedding_dim: 32
-  channel_combine_func: "mean" # Valid values: [mean, logsumexp]
+    # distribution: "q_log_uniform"
+    # min: 2.079 # log(8)
+    # max: 5.545 # log(256)
+    # q: 8
+  channel_combine_func: ["mean", "logsumexp"] # Valid values: [mean, logsumexp]
 
   ### Primary Model ###
 
   # Single channel module params
   single_channel_module:
-    enabled: True
+    enabled: True # [True, False]
 
     # Conv
     filter_size: 100
@@ -131,13 +153,17 @@ model:
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
-    feedforward_dim: 128
+    feedforward_dim: 64
+      # distribution: "q_log_uniform"
+      # min: 2.773 # log(16)
+      # max: 5.545 # log(256)
+      # q: 16
 
   # Mixed channel module parameters
   mixed_channel_module:
-    enabled: True
+    enabled: True # [True, False]
 
-    # Conv (NOT USED unless the single channel module is disabled)
+    # Conv
     filter_size: 100
     stride: 75
 
@@ -145,14 +171,19 @@ model:
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
-    feedforward_dim: 128
+    feedforward_dim: 32
+      # distribution: "q_log_uniform"
+      # min: 2.773 # log(16)
+      # max: 5.545 # log(256)
+      # q: 16
 
   ### Calibration Model ###
   
   # Calibration module params
   calibration_module:
-    enabled: True
+    enabled: True # [True, False]
 
+    # TODO: Add distribution for filter size
     # Conv
     filter_size: 100
     stride: 75
@@ -161,4 +192,8 @@ model:
     n_layers: 2
     dropout: 0.4
     n_head: 2 # N heads for the attention
-    feedforward_dim: 128
+    feedforward_dim: 64
+      # distribution: "q_log_uniform"
+      # min: 2.773 # log(16)
+      # max: 5.545 # log(256)
+      # q: 16

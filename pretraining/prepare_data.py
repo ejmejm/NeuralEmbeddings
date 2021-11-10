@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from config_handling import load_config
+from config_handling import prepare_config
 from data_loading import load_raw_data, preprocess_and_save_data, correct_all_data
 
 
@@ -9,18 +9,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', type=str, default='configs/test_config.yaml',
                     help='Path to config file')
 
-
-if __name__ == '__main__':
-    args = parser.parse_args()
-
-    # Get the path of the config file in relation to this main.py file
-    base_dir = os.path.dirname(__file__)
-    config_path = os.path.join(base_dir, args.config)
-
-    # Load the config file
-    config = load_config(config_path)
-    
+def prepare_data(config):
     # Load and process the train data
+    base_dir = os.path.dirname(__file__)
     file_type = config['data_file_type']
     metadata_fn = config['train_val_info']
     train_dir = os.path.join(base_dir, config['train_dir'])
@@ -31,10 +22,7 @@ if __name__ == '__main__':
 
     print('Loading train data...')
     train_data = load_raw_data(train_dir, file_type)
-    if train_data is not None and len(train_data) > 0:
-        preprocess_and_save_data(train_data, config, output_dir, metadata_fn)
-    else:
-        print('No train data found!')
+    preprocess_and_save_data(train_data, config, output_dir, metadata_fn)
 
     # Load and process the test data
     metadata_fn = config['test_info']
@@ -46,7 +34,16 @@ if __name__ == '__main__':
 
     print('Loading test data...')
     test_data = load_raw_data(test_dir, file_type)
-    if test_data is not None and len(test_data) > 0:
-        preprocess_and_save_data(test_data, config, output_dir, metadata_fn)
-    else:
-        print('No test data found.')
+    preprocess_and_save_data(test_data, config,
+        output_dir, metadata_fn, fit_preprocessors=False)
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+
+    # Load the config file
+    base_dir = os.path.dirname(__file__)
+    config_path = os.path.join(base_dir, args.config)
+    config = prepare_config(config_path)
+
+    # Preprocess the data
+    prepare_data(config)

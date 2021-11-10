@@ -5,8 +5,7 @@ import numpy as np
 import torch
 import wandb
 
-from config_handling import load_config, to_wandb_format, validate_config
-from config_handling import merge_configs, DEFAULT_CONFIG
+from config_handling import prepare_config, to_wandb_format
 from data_loading import prepare_dataloaders
 from models import NeuroSignalEncoder
 from training.msm import train_with_msm
@@ -73,9 +72,10 @@ def train(config: dict):
             .format(config['train_method']))
 
     # Save the model
-    base_dir = os.path.dirname(__file__)
-    save_path = os.path.join(base_dir, model_config['save_path'])
-    torch.save(model.state_dict(), save_path)
+    if model_config['save_path'] is not None:
+        base_dir = os.path.dirname(__file__)
+        save_path = os.path.join(base_dir, model_config['save_path'])
+        torch.save(model.state_dict(), save_path)
 
     wandb.finish()
 
@@ -84,18 +84,6 @@ def test(config: dict):
     Test the model.
     """
     raise NotImplementedError()
-
-def prepare_config(config_path: str):
-    # Get the path of the config file in relation to this main.py file
-    base_dir = os.path.dirname(__file__)
-    config_path = os.path.join(base_dir, config_path)
-
-    # Load the config file
-    config = load_config(config_path)
-    config = merge_configs(config, DEFAULT_CONFIG)
-    validate_config(config)
-
-    return config
 
 ### Main ###
 
