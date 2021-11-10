@@ -150,9 +150,9 @@ model:
     stride: 75
 
     # Transformer
-    n_layers: 2
+    n_layers: [1, 2, 3]
     dropout: 0.4
-    n_head: 2 # N heads for the attention
+    n_head: [1, 2, 3] # N heads for the attention
     feedforward_dim: 64
       # distribution: "q_log_uniform"
       # min: 2.773 # log(16)
@@ -168,9 +168,9 @@ model:
     stride: 75
 
     # Transformer
-    n_layers: 2
+    n_layers: [1, 2, 3]
     dropout: 0.4
-    n_head: 2 # N heads for the attention
+    n_head: [1, 2, 3] # N heads for the attention
     feedforward_dim: 32
       # distribution: "q_log_uniform"
       # min: 2.773 # log(16)
@@ -189,9 +189,9 @@ model:
     stride: 75
 
     # Transformer
-    n_layers: 2
+    n_layers: [1, 2, 3]
     dropout: 0.4
-    n_head: 2 # N heads for the attention
+    n_head: [1, 2, 3] # N heads for the attention
     feedforward_dim: 64
       # distribution: "q_log_uniform"
       # min: 2.773 # log(16)
