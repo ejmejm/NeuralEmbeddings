@@ -29,18 +29,28 @@ def calculate_cpc_loss(
     # Unpack outputs
     out_embeds = output_dict['embeddings']
     lstm_hiddens = output_dict['lstm_embeddings']
+
+    primary_embeds_mask = output_dict['primary_embeddings_mask']
+    primary_embeds_mask = primary_embeds_mask.bool().unsqueeze(-1)
+
+    selected_out_embeds = out_embeds.masked_select(primary_embeds_mask)
+    # This will break if different primary seq lengths are used within the same batch
+    out_embeds = selected_out_embeds.reshape(out_embeds.shape[0], -1, out_embeds.shape[2])
+
+    selected_lstm_hiddens = lstm_hiddens.masked_select(primary_embeds_mask)
+    lstm_hiddens = selected_lstm_hiddens.reshape(lstm_hiddens.shape[0], -1, lstm_hiddens.shape[2])
+
     seq_len = out_embeds.shape[1]
     n_pred_steps = len(bilinear_layers)
     # Rearrange the sequences as batches so they can
     # be passed to the bilinear layer all at once
-    # TODO: Only get the embeds with max_embed_len for efficiency
     if mi_seq_radius is None:
         batch_embeds = rearrange(out_embeds, 'b s e -> (b s) e')
 
     # Each index i corresponds to the i-th prediction step avg loss
     cpc_losses = [[] for _ in range(n_pred_steps)]
     # Calculate the cpc loss
-    for seq_idx in range(seq_len - n_pred_steps - 1):
+    for seq_idx in range(seq_len - 1):
         if mi_seq_radius is None:
             # Normally you need an LSTM output for each embedding sequence element
             mod_seq_len = seq_len
@@ -60,7 +70,7 @@ def calculate_cpc_loss(
         target_hiddens = lstm_hiddens[:, seq_idx:seq_idx+1].repeat(1, mod_seq_len, 1)
         batch_hiddens = rearrange(target_hiddens, 'b s e -> (b s) e')
 
-        for pred_step in range(n_pred_steps):
+        for pred_step in range(min(n_pred_steps, seq_len - seq_idx - 1)):
             # Calculate the mutual information
             mis = bilinear_layers[pred_step](batch_embeds, batch_hiddens)
             # Recover the sequences
@@ -73,6 +83,10 @@ def calculate_cpc_loss(
             seq_sums = torch.sum(mis, dim=1)
             losses = -torch.log(positive_samples / seq_sums)
             cpc_losses[pred_step].extend(losses)
+
+        if seq_len - seq_idx - 1 < n_pred_steps:
+            for i in range(n_pred_steps - (seq_len - seq_idx - 1)):
+                cpc_losses[pred_step + i + 1].extend(torch.zeros_like(losses))
 
     cpc_losses = torch.stack([torch.stack(l) for l in cpc_losses])
     cpc_losses = cpc_losses.mean(dim=1)

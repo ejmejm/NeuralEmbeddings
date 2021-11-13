@@ -474,6 +474,7 @@ class NeuroSignalEncoder(nn.Module):
             calib_embeds = rearrange(calib_embeds, '(b c) s e -> c (b s) e', c=n_channels)
             # Create hook to prepend calib embeds and add tags
             format_hook = lambda x: self._format_embeddings(x, calib_embeds)
+            # 0 for primary, 1 for calibration, 2 for special tokens
         else:
             # Create hook to add tags
             format_hook = lambda x: self._format_embeddings(x)
@@ -531,6 +532,13 @@ class NeuroSignalEncoder(nn.Module):
             mc_embeds = None
             mc_targets = None
 
+        primary_out_mask = torch.zeros((output_embeds.shape[0], output_embeds.shape[1]),
+            device=output_embeds.device)
+        primary_seq_len = sc_embeds.shape[2] - 1
+        if self.calibration_model is not None:
+            primary_seq_len -= self.calibration_model.embed_seq_len + 1
+        primary_out_mask[:, -primary_seq_len:] = 1
+
         ### LSTM head ###
 
         if self.lstm_head is not None:
@@ -552,5 +560,6 @@ class NeuroSignalEncoder(nn.Module):
             'sc_embeddings': sc_return_embeds,
             'sc_targets': sc_targets,
             'calib_embeddings': calib_return_embeds,
-            'calib_targets': calib_targets
+            'calib_targets': calib_targets,
+            'primary_embeddings_mask': primary_out_mask,
         }
