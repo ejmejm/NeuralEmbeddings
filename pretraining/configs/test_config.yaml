@@ -6,11 +6,6 @@
 
 ### TODO ###
 
-# Setup sweep config
-# Setup parameter validation
-# Setup testingd
-# Add a default config
-
 seed: null
 
 ### Weights & Biases Integration ###
@@ -19,13 +14,15 @@ wandb_mode: "offline" # ["online", "offline", "disabled"]
 
 ### Training ###
 
+device: "cpu"
+
 train_epochs: 4
 epoch_early_cutoff: 0.1
 learning_rate: 0.001
 log_interval: 4
 val_interval: 16
 
-train_method: "MSM"
+train_method: "CPC"
 
 # The method params only need to be defined
 # for the method being used
@@ -45,6 +42,7 @@ msm_params:
 cpc_params:
   embedding_dim: 64
   n_pred_steps: 2
+  mi_seq_radius: null
   scheduler_enabled: True
 
 # Number of samples = unit size * batch size

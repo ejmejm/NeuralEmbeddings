@@ -12,13 +12,16 @@ from models import NeuroSignalEncoder
 
 def calculate_cpc_loss(
     output_dict: dict[str, Tensor],
-    bilinear_layers: List[nn.Module]) -> float:
+    bilinear_layers: List[nn.Module],
+    mi_seq_radius: Optional[int] = None) -> float:
     """
     Calculates the contrstive predictive coding loss.
 
     Args:
         output_dict: Outputs of the encoder model.
         bilinear_layers: Layers used to calculate mutual info.
+        mi_seq_radius: Maximum sequence length to use in summation
+            in the denomicatior of the loss.
 
     Returns:
         The cpc loss.
@@ -28,30 +31,45 @@ def calculate_cpc_loss(
     lstm_hiddens = output_dict['lstm_embeddings']
     seq_len = out_embeds.shape[1]
     n_pred_steps = len(bilinear_layers)
-    # TODO: Add masking for calibration input and special tokens
     # Rearrange the sequences as batches so they can
     # be passed to the bilinear layer all at once
-    batch_embeds = rearrange(out_embeds, 'b s e -> (b s) e')
+    # TODO: Only get the embeds with max_embed_len for efficiency
+    if mi_seq_radius is None:
+        batch_embeds = rearrange(out_embeds, 'b s e -> (b s) e')
 
     # Each index i corresponds to the i-th prediction step avg loss
     cpc_losses = [[] for _ in range(n_pred_steps)]
     # Calculate the cpc loss
-    for seq_idx in range(seq_len - n_pred_steps):
+    for seq_idx in range(seq_len - n_pred_steps - 1):
+        if mi_seq_radius is None:
+            # Normally you need an LSTM output for each embedding sequence element
+            mod_seq_len = seq_len
+            seq_start_idx = 0
+        else:
+            # But for if mi_seq_radius is defined, we only need the elements
+            # within a radius of the current element
+            seq_start_idx = max(0, seq_idx - mi_seq_radius)
+            seq_end_idx = min(seq_len, seq_idx + mi_seq_radius + 1)
+            mod_seq_len = seq_end_idx - seq_start_idx
+
+            partial_embeds = out_embeds[:, seq_start_idx:seq_end_idx]
+            batch_embeds = rearrange(partial_embeds, 'b s e -> (b s) e')
+        
+        # Duplicate the lstm hidden state for get one for each 
+        # output embedding in the entire sequence
+        target_hiddens = lstm_hiddens[:, seq_idx:seq_idx+1].repeat(1, mod_seq_len, 1)
+        batch_hiddens = rearrange(target_hiddens, 'b s e -> (b s) e')
+
         for pred_step in range(n_pred_steps):
-            # Duplicate the lstm hidden state for get one for each 
-            # output embedding in the entire sequence
-            target_hiddens = lstm_hiddens[:, seq_idx:seq_idx+1].repeat(1, seq_len, 1)
-            batch_hiddens = rearrange(target_hiddens, 'b s e -> (b s) e')
             # Calculate the mutual information
-            # TODO: Speed this up by only using a portion of the full sequence
             mis = bilinear_layers[pred_step](batch_embeds, batch_hiddens)
             # Recover the sequences
             mis = rearrange(mis, '(b s) 1 -> b s',
-                b=out_embeds.shape[0], s=seq_len)
+                b=out_embeds.shape[0], s=mod_seq_len)
 
             # Calculate the losses
             mis = torch.exp(mis)
-            positive_samples = mis[:, seq_idx + pred_step]
+            positive_samples = mis[:, (seq_idx - seq_start_idx) + pred_step + 1]
             seq_sums = torch.sum(mis, dim=1)
             losses = -torch.log(positive_samples / seq_sums)
             cpc_losses[pred_step].extend(losses)
@@ -138,7 +156,8 @@ def train_with_cpc(
             output_dict = model(primary_input, calibration_input=calib_input)
 
             # Calculate the masked sequence modeling losses
-            cpc_losses = calculate_cpc_loss(output_dict, bilinear_layers)
+            cpc_losses = calculate_cpc_loss(output_dict, bilinear_layers,
+                cpc_config['mi_seq_radius'])
             cpc_loss = torch.sum(cpc_losses)
             batch_losses.append(cpc_loss.item())
 
@@ -190,6 +209,8 @@ def validate(model: NeuroSignalEncoder, bilinear_layers: List[nn.Module],
         val_loader: The data loader for validation.
         config: The training configuration.
     """
+    cpc_config = config['cpc_params']
+
     model.eval()
     val_losses = []
     with torch.no_grad():
@@ -205,7 +226,8 @@ def validate(model: NeuroSignalEncoder, bilinear_layers: List[nn.Module],
             output_dict = model(primary_input, calibration_input=calib_input)
 
             # Calculate the masked sequence modeling losses
-            cpc_losses = calculate_cpc_loss(output_dict, bilinear_layers)
+            cpc_losses = calculate_cpc_loss(output_dict, bilinear_layers,
+                cpc_config['mi_seq_radius'])
             val_losses.append(cpc_losses.detach().cpu().numpy())
 
     val_losses = np.array(val_losses).mean(axis=0)
