@@ -100,6 +100,11 @@ train_val_info: "dataset_info"
 test_info: "dataset_info"
 
 
+# Epoched data sample size
+tmin_samples: 200
+tmax_samples: 600
+
+
 ### Model ###
 
 

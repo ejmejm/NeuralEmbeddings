@@ -14,7 +14,9 @@ from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, random_split
 from tqdm import tqdm
 
-from config_handling import load_config
+from config_handling import prepare_config
+
+import argparse
 
 
 DATA_FILE_ENDING = '.pnd'
@@ -308,6 +310,7 @@ def apply_model_free_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Raw
 
     return data
 
+
 def apply_model_based_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Raw:
     """
     Applys preprocessing steps that require a learned model of the data.
@@ -339,6 +342,7 @@ def apply_model_based_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Ra
         # data = ica.apply(data)
         raise NotImplementedError('ICA has been disabled.')
     
+    # 
     data = data.to_data_frame()
     data.drop(['time'], axis=1, inplace=True)
     data = data.values
@@ -488,12 +492,240 @@ def prepare_dataloaders(config):
     return dataloaders
 
 
-# if __name__ == '__main__':
-#     base_dir = os.path.dirname(__file__)
-#     config_path = os.path.join(base_dir, 'configs/test_config.yaml')
-#     config = load_config(config_path)
-#     dataloaders = prepare_dataloaders(config)
-#     sample = next(iter(dataloaders['train']))
-#     print(sample)
-#     print('primary shape:', sample['primary_input'].shape)
-#     print('calibration shape:', sample['calibration_input'].shape)
+### EPOCHED DATA PREPROCESSING ###
+
+def apply_model_based_preprocessing_epochs(data: mne.io.Raw, config: dict, events: np.ndarray) -> tuple[Tensor, np.ndarray]:
+    """
+    Applys preprocessing steps that require a learned model of the data.
+
+    Args:
+        data: Data after pass through model free preprocessing.
+        config: Config dictionary.
+
+    Returns:
+        Fully preprocessed data.
+    """
+    # Load preprocessing models
+    base_dir = os.path.dirname(__file__)
+    model_path = os.path.join(base_dir, config['preprocessed_model_path'])
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f'Preprocessing model file not found: {model_path}')
+
+    with open(model_path, 'rb') as f:
+        preprocessing_models = pickle.load(f)
+
+    # ICA code 
+    if config['use_ica']:
+        # Taking this out for now for 2 reasons:
+        # 1. It is not clear how to apply ICA to multiple datasets
+        # 2. ICA is extremely slow
+
+        # ica = preprocessing_models['ica']
+        # data = ica.apply(data)
+        raise NotImplementedError('ICA has been disabled.')
+    
+    # Convert into epoches data
+    epochs_data, labels = get_epoched_data(data, config, events)
+    epochs_data_tensor = torch.zeros(epochs_data.shape)
+
+    # Standardize for each epoch
+    for epoch_data_num in range(epochs_data.shape[0]):
+        epoch_data = epochs_data[epoch_data_num, :, :]
+
+        # Standardization vs. normalization
+        if config['use_standardization']:
+            scaler = preprocessing_models['scaler']
+            flat_data = scaler.transform(epoch_data.reshape(-1, 1))
+            epoch_data = flat_data.reshape(epoch_data.shape)
+
+        elif config['use_normalization']:
+            # Taking it out because no time to make a class and saving it for downstream tasks
+            # Also no reason to believe it would perform better than the StandardScaler
+            # Could reimplement later
+            # data = torch.from_numpy(data.values).float()
+            # data = min_max_normalize(data)
+            raise NotImplementedError('Normalization not implemented yet.')
+
+        epoch_data = torch.from_numpy(epoch_data).float()
+        epochs_data_tensor[epoch_data_num, :, :] = epoch_data
+
+    return epochs_data_tensor, labels
+
+def preprocess_epoched_data(data: mne.io.Raw, config: dict, include_events_list: list) -> tuple[Tensor, np.ndarray]:
+    # Get events 
+    events = get_events(data, config, include_events_list)
+    # Get the specific channels of interest
+    data = select_target_data(data, config)
+    # Resample and run the data through a high-pass filter
+    data = apply_model_free_preprocessing(data, config)
+    # ICA and normalization/scaling
+    data, labels = apply_model_based_preprocessing_epochs(data, config, events)
+    return data, labels
+
+def get_events(data: mne.io.Raw, config: dict, include_events_list: list) -> np.ndarray:
+    """
+    Designed for the following dataset: https://openneuro.org/datasets/ds003352/versions/1.0.0
+    
+    Needs to be tested for other datasets
+    """
+
+    # Grab events with id 1 to 10 (there are other event ids; not sure what they are for)
+    events = mne.find_events(data, stim_channel = "STI101", shortest_event = 1, output = 'onset')
+
+    # include only events that are in include_events_list
+    events = mne.pick_events(events, include = include_events_list)
+    
+    return events
+
+def get_epoched_data(data: mne.io.Raw, config: dict, events: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Designed for the following dataset: https://openneuro.org/datasets/ds003352/versions/1.0.0
+    
+    Needs to be tested for other datasets
+    """
+
+    # Get array of event ids (all of them are between 1 and 10)
+    data_events_ids = events[:, 2]
+
+    # Create epoched data from (raw) data and events
+    tmin = -config['tmin_samples'] / data.info['sfreq']
+    tmax = config['tmax_samples'] / data.info['sfreq']
+    epochs = mne.Epochs(data, events, tmin=tmin, tmax=tmax,
+                    preload=True, reject=None)
+
+    # get new list of events (since epochs may be dropped if bad)
+    selections = epochs.selection
+    data_events_ids = data_events_ids[selections]
+
+    # Convert into 3D array of dimension (n_events, n_channels, n_epoch_time_length)
+    epochs_data = epochs.get_data()
+    
+    return epochs_data, data_events_ids
+
+
+    # If you need to see plot of events over time 
+    # event_dict = {1: "Light Pink Spiral", 2: "Dark Pink Spiral", 3: "Light Blue Spiral", 4: "Dark Blue Spiral", \
+    #     5: "Light Green Spiral", 6: "Dark Green Spiral", 7: "Light Orange Spiral", 8: "Dark Orange Spiral", 9: "green", \
+    #     10: "blue"}
+    # event_dict_flipped = dict((value, key) for key, value in event_dict.items())
+    # fig = mne.viz.plot_events(events, sfreq=raw_data.info['sfreq'],
+    #                       first_samp=raw_data.first_samp, event_id=event_dict_flipped)
+    # fig.subplots_adjust(right=0.7)  
+
+def preprocess_and_save_epoched_data(
+    all_raw_data_paths: List[List[str]],
+    config: dict,
+    output_dir: str,
+    include_events_list: list,
+    fit_preprocessors: bool = True):
+    """
+    Preprocesses raw data and saves it to a file.
+
+    Args:
+        all_raw_data: List of lists of raw data.
+        config: Configuration dictionary.
+        output_dir: Directory to save the preprocessed data.
+        metadata_fn: File name of the metadata file.
+    """
+    # Create the output directory if it does not exist
+    if not os.path.exists(output_dir):
+        print(f'Creating output directory: {output_dir}')
+        Path(output_dir).mkdir(parents=True)
+
+    # Clear output directory
+    print('Clearing output directory to make room for data...')
+    for f in glob.glob(os.path.join(output_dir, '*')):
+        os.remove(f)
+
+    if all_raw_data_paths is None or len(all_raw_data_paths) == 0:
+        warnings.warn(f'No raw data found in "{output_dir}".')
+
+    all_data_paths = [raw_data for database in all_raw_data_paths for raw_data in database]
+
+    if fit_preprocessors:
+        # Sample some of the data for fitting the preprocessing models
+        n_fit_samples = min(config['preprocess_fit_samples'], len(all_data_paths))
+        print(f'Using {n_fit_samples} samples for fitting preprocessing models')
+        fit_data_paths = np.random.choice(all_data_paths, len(all_data_paths), False)
+
+        print('Loading data for fitting preprocessing models...')
+        fit_samples = []
+        with tqdm(total=n_fit_samples) as bar:
+            sample_idx = 0
+            while len(fit_samples) < n_fit_samples and sample_idx < len(fit_data_paths):
+                # load raw data; skip any bad data (should)
+                try:
+                    raw_data = mne.io.read_raw_fif(fit_data_paths[sample_idx],
+                        on_split_missing='raise', preload=True, verbose=False)
+                    sample_idx += 1
+
+                    if len(raw_data) < config['min_recording_length']:
+                        raise ValueError('Sample too small')
+                        
+                    fit_samples.append(raw_data)
+                    bar.update(1)
+                except ValueError:
+                    warnings.warn('Should not have skipped; check data again')
+                    sample_idx += 1
+                    continue
+        
+        # Learn the needed preprocessing models
+        print('Fitting preprocessing models...')
+        learn_preprocessors(fit_samples, config)
+
+    print('Preprocessing...')
+    n_loaded = 0
+    for idx, raw_data_path in enumerate(tqdm(all_data_paths)):
+        # load raw data; skip any bad data (should)
+        try:
+            raw_data = mne.io.read_raw_fif(raw_data_path, on_split_missing='warn',
+                preload=True, verbose=False)
+        except ValueError as e:
+            warnings.warn(f'Skipping {raw_data_path} due to error: {e}')
+            continue
+
+        if len(raw_data) < config['min_recording_length']:
+            warnings.warn(f'Skipping sample {raw_data_path} because it is too short.')
+            continue
+
+        preprocessed_data, labels = preprocess_epoched_data(raw_data, config, include_events_list)
+
+        n_loaded += 1
+        torch.save(preprocessed_data, f'{output_dir}/run_{idx}' + DATA_FILE_ENDING)
+
+        labels_path = os.path.join(output_dir, f'labels_{idx}{METADATA_FILE_ENDING}')
+        with open(labels_path, 'wb') as filehandle:
+            pickle.dump(labels, filehandle)
+
+    print(f'Successfully preprocessed {n_loaded}/{len(all_data_paths)} runs.')
+    
+class BatchTensorEpochedDataset(Dataset):
+    """
+    Dataset that groups a dataset of Tensors into batches.
+    """
+    def __init__(self, config: dict, metadata_path: str, load_path: str):
+        """
+        Args:
+            config: Dictionary of configuration parameters
+            metadata_path: Path to the metadata file (for labels)
+            load_dir: Path to data file
+        """
+        
+        with open(metadata_path, 'rb') as filehandle:
+            self.labels = pickle.load(filehandle)
+
+        self.config = config
+        self.load_path = load_path
+        
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx: int) -> Tensor:
+        data = torch.load(self.load_path)
+        data_epoch = data[idx, :, :]
+        label = self.labels[idx]
+        
+        return data_epoch, label
+
+
