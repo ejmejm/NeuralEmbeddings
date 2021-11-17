@@ -1,5 +1,6 @@
 import argparse
 import os
+from typing import Optional
 
 import numpy as np
 import torch
@@ -16,6 +17,8 @@ from training.cpc import train_with_cpc
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', type=str, default='configs/test_config.yaml',
                     help='Path to config file')
+parser.add_argument('-g', '--group', type=str, default=None,
+                    help='Add the run to the given group for easier tracking.')
 parser.add_argument('-t', '--train', dest='train', action='store_true',
                     help='Performs training when set to true.')
 parser.add_argument('-n', '--no_train', dest='train', action='store_false',
@@ -28,13 +31,13 @@ parser.set_defaults(gen_data=False, train=True, test=False)
 ### Main Functions ###
 
 
-def train(config: dict):
+def train(config: dict, group: Optional[str] = None):
     """
     Train the model.
     """
     # Init wandb for logging
     wandb_config = to_wandb_format(config)
-    wandb.init(entity=config['wandb_entity'],
+    wandb.init(entity=config['wandb_entity'], group=group,
         project=config['wandb_project'], config=wandb_config)
 
     # Choose random seed if not provided
@@ -94,7 +97,7 @@ if __name__ == '__main__':
 
     # Train the model
     if args.train:
-        train(config)
+        train(config, args.group)
     # Test the model
     if args.test:
         test(config)

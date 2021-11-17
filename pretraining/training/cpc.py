@@ -151,10 +151,19 @@ def train_with_cpc(
     val_losses = validate(model, bilinear_layers, val_loader, config)
     log_losses(val_losses, prefix='val_')
 
+    n_batches = len(train_loader)
+    if 'epoch_early_cutoff' in config and \
+            config['epoch_early_cutoff'] is not None:
+        n_batches = int(n_batches * config['epoch_early_cutoff'])
+
     for epoch in range(config['train_epochs']):
         model.train()
         batch_losses = []
         for batch_idx, data in enumerate(train_loader):
+            if batch_idx >= n_batches:
+                print('Stopping batch early for specified early cutoff')
+                break
+            
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
             if model.calibration_model is not None:
@@ -189,10 +198,10 @@ def train_with_cpc(
 
             # Log the epoch, batch, and loss
             if (batch_idx + 1) % config['log_interval'] == 0 or \
-               (batch_idx + 1) == len(train_loader):
+               (batch_idx + 1) == n_batches:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
-                    epoch + 1, batch_idx + 1, len(train_loader.dataset),
-                    100. * (batch_idx + 1) / len(train_loader)))
+                    epoch + 1, batch_idx + 1, n_batches,
+                    100. * (batch_idx + 1) / n_batches))
                 avg_loss = np.mean(batch_losses[-config['log_interval']:])
                 print(f'loss: {avg_loss:.5f}')
 
@@ -201,7 +210,7 @@ def train_with_cpc(
             do_validation = val_loader is not None and \
                     (config['val_interval'] is not None and \
                     (batch_idx + 1) % config['val_interval'] == 0) or \
-                    (batch_idx + 1) == len(train_loader)
+                    (batch_idx + 1) == n_batches
             if do_validation:
                 val_losses = validate(model, bilinear_layers, val_loader, config)
                 print('Validation losses:')

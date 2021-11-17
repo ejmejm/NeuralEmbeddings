@@ -16,7 +16,7 @@ wandb_project: "neural-embeddings"
 
 ### Training ###
 
-train_epochs: 10
+train_epochs: 5
 learning_rate: 0.001
 log_interval: 64
 val_interval: 512
@@ -32,13 +32,13 @@ msm_params:
   # These learning rates are overwriten by the global
   # lr if not defined or null
   sc_lr: 0.001
-  mc_lr: 0.001
-  calib_lr: 0.001
+  mc_lr: 0.0005
+  calib_lr: 0.0002
   scheduler_enabled: True
   phase_decay: 0.1
   
 cpc_params:
-  embedding_dim: 128
+  embedding_dim: 256
   n_pred_steps: 12
   mi_seq_radius: null # Radius of sequence embeddings to use for loss calculation
   scheduler_enabled: True
@@ -131,7 +131,7 @@ model:
     # Transformer
     n_layers: 2
     dropout: 0.4
-    n_head: 2 # N heads for the attention
+    n_head: 4 # N heads for the attention
     feedforward_dim: 128
 
   # Mixed channel module parameters
@@ -143,9 +143,9 @@ model:
     stride: 75
 
     # Transformer
-    n_layers: 2
+    n_layers: 1
     dropout: 0.4
-    n_head: 2 # N heads for the attention
+    n_head: 1 # N heads for the attention
     feedforward_dim: 128
 
   ### Calibration Model ###
@@ -159,7 +159,7 @@ model:
     stride: 75
 
     # Transformer
-    n_layers: 2
+    n_layers: 4
     dropout: 0.4
     n_head: 2 # N heads for the attention
     feedforward_dim: 128

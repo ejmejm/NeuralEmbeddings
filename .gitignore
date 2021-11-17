@@ -6,3 +6,4 @@ models/*.pt
 *.ipynb
 old_testing.py
 *.pkl
+*.bat

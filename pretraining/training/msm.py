@@ -431,13 +431,14 @@ def train_with_msm(
     val_losses = validate(model, val_loader, config)
     wandb.log(format_loss_map(val_losses, 'val_'))
 
+    n_batches = len(train_loader)
+    if 'epoch_early_cutoff' in config and \
+            config['epoch_early_cutoff'] is not None:
+        n_batches = int(n_batches * config['epoch_early_cutoff'])
+
     for epoch in range(config['train_epochs']):
         model.train()
         batch_losses = create_loss_map(config['model'])
-        n_batches = len(train_loader)
-        if 'epoch_early_cutoff' in config and \
-                config['epoch_early_cutoff'] is not None:
-            n_batches = int(n_batches * config['epoch_early_cutoff'])
 
         for batch_idx, data in enumerate(train_loader):
             if batch_idx >= n_batches:

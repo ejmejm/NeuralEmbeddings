@@ -164,7 +164,9 @@ def validate_config(config: dict):
         raise ValueError('Calibration module cannot be enabled without ' + \
             'a single channel module.')
 
-    if config['cpc_params']['mi_seq_radius'] is not None and \
+    if 'cpc_params' in config and \
+       'mi_seq_radius' in config['cpc_params'] and \
+       config['cpc_params']['mi_seq_radius'] and \
        config['cpc_params']['mi_seq_radius'] < \
        config['cpc_params']['n_pred_steps']:
         raise ValueError('The sequence radius length for CPC ' + \
