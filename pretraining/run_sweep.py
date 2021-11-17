@@ -29,7 +29,7 @@ parser.add_argument('-d', '--device', dest='device', default=None,
                     help='Device to use for training.')
 parser.add_argument('-s', '--sweep_id', type=str, default=None)
 
-parser.set_defaults(preprocess=True, train=True)
+parser.set_defaults(preprocess=False, train=True)
 
 ### Main ###
 

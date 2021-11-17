@@ -125,12 +125,12 @@ ica:
 # Number of samples used to fit preprocessors
 preprocess_fit_samples: 5
 # Save path for preprocessed models
-preprocessed_model_path: "../models/msm_sweep_preprocessors.pkl"
+preprocessed_model_path: "../models/experiment_preprocessors.pkl"
 
 # TODO: Change to full data
 # Save paths for preprocessed data
-train_val_preprocessed: "data/msm_sweep_train_preprocessed"
-test_preprocessed: "data/msm_sweep_test_preprocessed"
+train_val_preprocessed: "data/experiment_train_preprocessed"
+test_preprocessed: "data/experiment_test_preprocessed"
 
 ### Model ###
 

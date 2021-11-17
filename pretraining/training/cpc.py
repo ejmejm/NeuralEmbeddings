@@ -151,10 +151,19 @@ def train_with_cpc(
     val_losses = validate(model, bilinear_layers, val_loader, config)
     log_losses(val_losses, prefix='val_')
 
+    n_batches = len(train_loader)
+    if 'epoch_early_cutoff' in config and \
+            config['epoch_early_cutoff'] is not None:
+        n_batches = int(n_batches * config['epoch_early_cutoff'])
+
     for epoch in range(config['train_epochs']):
         model.train()
         batch_losses = []
         for batch_idx, data in enumerate(train_loader):
+            if batch_idx >= n_batches:
+                print('Stopping batch early for specified early cutoff')
+                break
+            
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
             if model.calibration_model is not None:

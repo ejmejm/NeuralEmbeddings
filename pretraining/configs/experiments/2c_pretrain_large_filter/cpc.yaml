@@ -1,0 +1,17 @@
+# Wandb params
+wandb_mode: "online"
+
+# Training params
+train_method: "CPC"
+train_epochs: 3
+epoch_early_cutoff: 0.3
+
+model:
+  calibration_module:
+    filter_size: 500
+    stride: 450
+
+# Data paths
+preprocessed_model_path: "../models/experiment_preprocessors.pkl"
+train_val_preprocessed: "data/experiment_train_preprocessed"
+test_preprocessed: "data/experiment_test_preprocessed"
