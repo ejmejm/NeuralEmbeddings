@@ -2,7 +2,7 @@ import argparse
 import os
 
 from config_handling import prepare_config
-from data_loading import load_raw_data, preprocess_and_save_data, correct_all_data
+from data_loading import load_raw_data, preprocess_and_save_data, correct_all_data, preprocess_and_save_epoched_data
 
 
 parser = argparse.ArgumentParser()
@@ -37,6 +37,26 @@ def prepare_data(config):
     preprocess_and_save_data(test_data, config,
         output_dir, metadata_fn, fit_preprocessors=False)
 
+
+def prepare_downstream_data(config):
+    # Load and process the train data
+    base_dir = os.path.dirname(__file__)
+    file_type = config['data_file_type']
+    label_fn = config['label_info']
+    downstream_dir = os.path.join(base_dir, config['downstream_dir'])
+    output_dir = os.path.join(base_dir, config['downstream_preprocessed'])
+
+    # print('Fixing train split issues...')
+    # correct_all_data(train_dir, file_type)
+
+    print('Loading train data...')
+    downstream_data = load_raw_data(downstream_dir, file_type)
+
+    # Need to pass in a list of events 
+    # (for colors dataset we have are looking for events with id = 1, 2, ..., 10)
+    preprocess_and_save_epoched_data(downstream_data, config, output_dir, label_fn, include_events_list=list(range(1, 11)))
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
 
@@ -47,3 +67,6 @@ if __name__ == '__main__':
 
     # Preprocess the data
     prepare_data(config)
+
+    # Preprocess the downstream data
+    prepare_downstream_data(config)

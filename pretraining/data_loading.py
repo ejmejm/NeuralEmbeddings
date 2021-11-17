@@ -16,7 +16,6 @@ from tqdm import tqdm
 
 from config_handling import prepare_config
 
-import argparse
 
 
 DATA_FILE_ENDING = '.pnd'
@@ -492,6 +491,11 @@ def prepare_dataloaders(config):
     return dataloaders
 
 
+
+
+
+
+
 ### EPOCHED DATA PREPROCESSING ###
 
 def apply_model_based_preprocessing_epochs(data: mne.io.Raw, config: dict, events: np.ndarray) -> tuple[Tensor, np.ndarray]:
@@ -603,7 +607,6 @@ def get_epoched_data(data: mne.io.Raw, config: dict, events: np.ndarray) -> tupl
     
     return epochs_data, data_events_ids
 
-
     # If you need to see plot of events over time 
     # event_dict = {1: "Light Pink Spiral", 2: "Dark Pink Spiral", 3: "Light Blue Spiral", 4: "Dark Blue Spiral", \
     #     5: "Light Green Spiral", 6: "Dark Green Spiral", 7: "Light Orange Spiral", 8: "Dark Orange Spiral", 9: "green", \
@@ -617,8 +620,8 @@ def preprocess_and_save_epoched_data(
     all_raw_data_paths: List[List[str]],
     config: dict,
     output_dir: str,
-    include_events_list: list,
-    fit_preprocessors: bool = True):
+    label_fn: str,
+    include_events_list: list):
     """
     Preprocesses raw data and saves it to a file.
 
@@ -642,39 +645,15 @@ def preprocess_and_save_epoched_data(
         warnings.warn(f'No raw data found in "{output_dir}".')
 
     all_data_paths = [raw_data for database in all_raw_data_paths for raw_data in database]
-
-    if fit_preprocessors:
-        # Sample some of the data for fitting the preprocessing models
-        n_fit_samples = min(config['preprocess_fit_samples'], len(all_data_paths))
-        print(f'Using {n_fit_samples} samples for fitting preprocessing models')
-        fit_data_paths = np.random.choice(all_data_paths, len(all_data_paths), False)
-
-        print('Loading data for fitting preprocessing models...')
-        fit_samples = []
-        with tqdm(total=n_fit_samples) as bar:
-            sample_idx = 0
-            while len(fit_samples) < n_fit_samples and sample_idx < len(fit_data_paths):
-                # load raw data; skip any bad data (should)
-                try:
-                    raw_data = mne.io.read_raw_fif(fit_data_paths[sample_idx],
-                        on_split_missing='raise', preload=True, verbose=False)
-                    sample_idx += 1
-
-                    if len(raw_data) < config['min_recording_length']:
-                        raise ValueError('Sample too small')
-                        
-                    fit_samples.append(raw_data)
-                    bar.update(1)
-                except ValueError:
-                    warnings.warn('Should not have skipped; check data again')
-                    sample_idx += 1
-                    continue
-        
-        # Learn the needed preprocessing models
-        print('Fitting preprocessing models...')
-        learn_preprocessors(fit_samples, config)
+    
+    # Do not need to fit preprocessors for downstream task; only need to apply it 
+    # (see apply_model_based_preprocessing_epochs)
 
     print('Preprocessing...')
+
+    # Keep track of all labels
+    all_labels = list()
+
     n_loaded = 0
     for idx, raw_data_path in enumerate(tqdm(all_data_paths)):
         # load raw data; skip any bad data (should)
@@ -688,44 +667,105 @@ def preprocess_and_save_epoched_data(
         if len(raw_data) < config['min_recording_length']:
             warnings.warn(f'Skipping sample {raw_data_path} because it is too short.')
             continue
-
+        
+        # get preprocessed data and save (by run and epoch)
         preprocessed_data, labels = preprocess_epoched_data(raw_data, config, include_events_list)
-
+        all_labels.append(labels)
         n_loaded += 1
-        torch.save(preprocessed_data, f'{output_dir}/run_{idx}' + DATA_FILE_ENDING)
+        save_epoched_data(preprocessed_data, output_dir, idx)
 
-        labels_path = os.path.join(output_dir, f'labels_{idx}{METADATA_FILE_ENDING}')
-        with open(labels_path, 'wb') as filehandle:
-            pickle.dump(labels, filehandle)
+    
+    all_labels_path = os.path.join(output_dir, f'{label_fn}{METADATA_FILE_ENDING}')
+    with open(all_labels_path, 'wb') as filehandle:
+        pickle.dump(all_labels, filehandle)
 
     print(f'Successfully preprocessed {n_loaded}/{len(all_data_paths)} runs.')
     
+def save_epoched_data(preprocessed_data: Tensor, output_dir: str, run_num: str):
+    """
+    Save epoched data 
+    
+    Each epoch is saved to a separate file 
+    """
+
+    for epoch_data_num in range(preprocessed_data.shape[0]):
+        # Remember to clone or else you'll save all of preprocessed_data
+        epoch_data = preprocessed_data[epoch_data_num, :, :].clone()
+
+        torch.save(epoch_data, f'{output_dir}/run_{run_num}_epoch_{epoch_data_num}' + DATA_FILE_ENDING)
+
 class BatchTensorEpochedDataset(Dataset):
     """
     Dataset that groups a dataset of Tensors into batches.
     """
-    def __init__(self, config: dict, metadata_path: str, load_path: str):
+    def __init__(self, config: dict, label_path: str, load_dir: str):
         """
         Args:
             config: Dictionary of configuration parameters
-            metadata_path: Path to the metadata file (for labels)
-            load_dir: Path to data file
+            label_path: Path to the label files
+            load_dir: Path to data files
         """
-        
-        with open(metadata_path, 'rb') as filehandle:
-            self.labels = pickle.load(filehandle)
 
         self.config = config
-        self.load_path = load_path
+        self.load_dir = load_dir
+        
+        with open(label_path, 'rb') as filehandle:
+            self.all_labels = pickle.load(filehandle)
+
+        self.list_of_boundaries = np.cumsum(np.array([0] + [len(labels) for labels in self.all_labels]))
         
     def __len__(self):
-        return len(self.labels)
+        return self.list_of_boundaries[-1]
 
-    def __getitem__(self, idx: int) -> Tensor:
-        data = torch.load(self.load_path)
-        data_epoch = data[idx, :, :]
-        label = self.labels[idx]
-        
-        return data_epoch, label
+    def __getitem__(self, idx: int) -> tuple[Tensor, int]:
+        # Convert idx (1D) into run, epoch (2D)
+        run_num = None
+        run_value = None
+        for j, value in enumerate(self.list_of_boundaries):
+            if self.list_of_boundaries[j+1] > idx >= value:
+                run_num = j
+                run_value = value
+                break
 
+        epoch_num = idx - run_value
+
+        # (n_channels, sample_size)
+        data_run = torch.load(os.path.join(self.load_dir, f'run_{run_num}_epoch_{epoch_num}' + DATA_FILE_ENDING))
+
+        return data_run, self.all_labels[run_num][epoch_num]
+
+def prepare_downsteam_dataloaders(config):
+    base_dir = os.path.dirname(__file__)
+
+    downstream_data_path = os.path.join(base_dir, config['downstream_preprocessed'])
+    label_path = os.path.join(downstream_data_path, config['label_info'] + METADATA_FILE_ENDING)
+
+    # Check if the data and metadata paths/files exist, and load if it does
+    if os.path.exists(downstream_data_path) and os.path.exists(label_path):
+        downstream_dataset = BatchTensorEpochedDataset(config, label_path, downstream_data_path)
+        n_val_samples = int(config['val_split'] * len(downstream_dataset))
+        n_test_samples = int(config['test_split'] * len(downstream_dataset))
+        n_train_samples = len(downstream_dataset) - n_val_samples - n_test_samples
+        train_dataset, val_dataset, test_dataset = random_split(
+            downstream_dataset, [n_train_samples, n_val_samples, n_test_samples])
+    else:
+        warnings.warn('The training data or training metadata file does not exist. ' +
+                      'Skipping loading of the training data.')
+        train_dataset = None
+        val_dataset = None
+        test_dataset = None
+
+    dataloaders = {
+        'train': DataLoader(
+            train_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
+                if train_dataset is not None and len(train_dataset) > 0 else None,
+        'val': DataLoader(
+            val_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
+                if val_dataset is not None and len(val_dataset) > 0 else None,
+        'test': DataLoader(
+            test_dataset,  shuffle=True, collate_fn=get_first_element, num_workers=2) \
+                if test_dataset is not None and len(test_dataset) > 0 else None
+    }
+
+    return dataloaders
 

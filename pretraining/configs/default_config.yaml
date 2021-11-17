@@ -99,11 +99,13 @@ test_preprocessed: "data/test_preprocessed"
 train_val_info: "dataset_info"
 test_info: "dataset_info"
 
-
-# Epoched data sample size
+# Downstream 
 tmin_samples: 200
 tmax_samples: 600
 
+label_info: "all_labels"
+downstream_preprocessed: "data/downstream_preprocessed"
+downstream_dir: "data/downstream_data"
 
 ### Model ###
 
