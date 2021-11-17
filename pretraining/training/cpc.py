@@ -198,10 +198,10 @@ def train_with_cpc(
 
             # Log the epoch, batch, and loss
             if (batch_idx + 1) % config['log_interval'] == 0 or \
-               (batch_idx + 1) == len(train_loader):
+               (batch_idx + 1) == n_batches:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
-                    epoch + 1, batch_idx + 1, len(train_loader.dataset),
-                    100. * (batch_idx + 1) / len(train_loader)))
+                    epoch + 1, batch_idx + 1, n_batches,
+                    100. * (batch_idx + 1) / n_batches))
                 avg_loss = np.mean(batch_losses[-config['log_interval']:])
                 print(f'loss: {avg_loss:.5f}')
 
@@ -210,7 +210,7 @@ def train_with_cpc(
             do_validation = val_loader is not None and \
                     (config['val_interval'] is not None and \
                     (batch_idx + 1) % config['val_interval'] == 0) or \
-                    (batch_idx + 1) == len(train_loader)
+                    (batch_idx + 1) == n_batches
             if do_validation:
                 val_losses = validate(model, bilinear_layers, val_loader, config)
                 print('Validation losses:')
