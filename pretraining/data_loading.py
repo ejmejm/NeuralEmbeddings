@@ -17,7 +17,6 @@ from tqdm import tqdm
 from config_handling import prepare_config
 
 
-
 DATA_FILE_ENDING = '.pnd'
 METADATA_FILE_ENDING = '.pkl'
 
@@ -732,7 +731,13 @@ class BatchTensorEpochedDataset(Dataset):
         # (n_channels, sample_size)
         data_run = torch.load(os.path.join(self.load_dir, f'run_{run_num}_epoch_{epoch_num}' + DATA_FILE_ENDING))
 
-        return data_run, self.all_labels[run_num][epoch_num]
+        dict_data_run = {
+            'calibration_input': data_run[:, :self.config['tmin_samples']],
+            'primary_input': data_run[:, self.config['tmin_samples']:]
+        }
+
+        return dict_data_run, self.all_labels[run_num][epoch_num]
+
 
 def prepare_downsteam_dataloaders(config):
     base_dir = os.path.dirname(__file__)
@@ -768,4 +773,24 @@ def prepare_downsteam_dataloaders(config):
     }
 
     return dataloaders
+
+
+
+def prepare_downstream_data(config):
+    # Load and process the train data
+    base_dir = os.path.dirname(__file__)
+    file_type = config['data_file_type']
+    label_fn = config['label_info']
+    downstream_dir = os.path.join(base_dir, config['downstream_dir'])
+    output_dir = os.path.join(base_dir, config['downstream_preprocessed'])
+
+    # print('Fixing train split issues...')
+    # correct_all_data(train_dir, file_type)
+
+    print('Loading train data...')
+    downstream_data = load_raw_data(downstream_dir, file_type)
+
+    # Need to pass in a list of events 
+    preprocess_and_save_epoched_data(downstream_data, config, output_dir, label_fn, include_events_list=list(range(1, 11)))
+
 
