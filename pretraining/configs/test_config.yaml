@@ -40,7 +40,6 @@ msm_params:
   phase_decay: 0.1
   
 cpc_params:
-  embedding_dim: 64
   n_pred_steps: 2
   mi_seq_radius: null
   scheduler_enabled: True
@@ -78,3 +77,5 @@ model:
 
   max_primary_input_len: 1000
   max_calibration_input_len: 2000
+
+  lstm_embedding_dim: 64

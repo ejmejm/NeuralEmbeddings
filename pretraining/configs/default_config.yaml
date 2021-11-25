@@ -38,7 +38,6 @@ msm_params:
   phase_decay: 0.1
   
 cpc_params:
-  embedding_dim: 256
   n_pred_steps: 12
   mi_seq_radius: null # Radius of sequence embeddings to use for loss calculation
   scheduler_enabled: True
@@ -99,16 +98,33 @@ test_preprocessed: "data/test_preprocessed"
 train_val_info: "dataset_info"
 test_info: "dataset_info"
 
-# Downstream 
-tmin_samples: 200
-tmax_samples: 600
+### Downstream ###
+
+downstream:
+  train_epochs: 2
+  learning_rate: 0.001
+  batch_size: 4
+  log_interval: 4
+  val_interval: 8
+
+  # Number of classes for downstream classification
+  n_classes: 10
+
+  # Number of samples to take before and after the stimulus onset
+  tmin_samples: 5000
+  tmax_samples: 1000
+
+  # How many samples after stimulus onset to use for decoding
+  n_stimulus_samples: 600
+
+  # Where to save the decoder model
+  model_path: "../models/downstream_model.pt"
 
 label_info: "all_labels"
 downstream_preprocessed: "data/downstream_preprocessed"
-downstream_dir: "data/downstream_data"
+downstream_dir: "data/downstream_datasets"
 
 ### Model ###
-
 
 model:
   save_path: "../models/model.pt"
@@ -116,6 +132,7 @@ model:
   max_primary_input_len: 1000
   max_calibration_input_len: 5000
   embedding_dim: 32
+  lstm_embedding_dim: 256 # Emebed dim for LSTM output layer
   channel_combine_func: "mean" # Valid values: [mean, logsumexp]
 
   ### Primary Model ###

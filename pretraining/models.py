@@ -563,3 +563,72 @@ class NeuroSignalEncoder(nn.Module):
             'calib_targets': calib_targets,
             'primary_embeddings_mask': primary_out_mask,
         }
+
+
+class NeuroDecoder(nn.Module):
+    def __init__(self,
+                 config: dict,
+                 encoder: Optional[NeuroSignalEncoder] = None):
+        super().__init__()
+        self.config = config
+        self.model_config = config['model']
+        self.downstream_config = config['downstream']
+
+        # Load the encoder model if necessary
+        if encoder is None:
+            self.encoder = NeuroSignalEncoder(self.model_config)
+            
+            # Add LSTM layer to model before loading weights if CPC was used
+            if self.config['train_method'].lower() == 'cpc':
+                self.encoder.add_lstm_head(self.model_config['lstm_embedding_dim'])
+                self.encoder.load_state_dict(torch.load(self.model_config['save_path']))
+            else:
+                # MSM was not trained with the LSTM head, so it should be added after
+                # the weights for the rest of the model are loaded
+                self.encoder.load_state_dict(torch.load(self.model_config['save_path']))
+                self.encoder.add_lstm_head(self.model_config['lstm_embedding_dim'])
+        else:
+            self.encoder = encoder
+            
+        self.decoder = nn.Sequential(
+            nn.Linear(self.model_config['lstm_embedding_dim'], 128),
+            nn.ReLU(),
+            nn.Linear(128, self.downstream_config['n_classes']))
+
+    def forward(self,
+                primary_input: Tensor,
+                calibration_input: Optional[Tensor] = None) -> Tensor:
+        """
+        Forward pass of the decoder, that takes stimulus inputs and outputs
+        a predicted class.
+
+        Args:
+            primary_input: Tensor of shape (batch_size, n_timesteps, n_channels)
+            calibration_input: Tensor of shape (1, n_timesteps, n_channels)
+
+        Returns:
+            Tensor of shape (batch_size, n_classes)
+        """
+        # Pass the input signals through the encoder
+        output_dict = self.encoder(primary_input, calibration_input=calibration_input)
+
+        lstm_embeds = output_dict['lstm_embeddings'] # Sequence of all hidden outputs
+        primary_mask = output_dict['primary_embeddings_mask']
+
+        # Select the embeddings corresponding to the primary sequence
+        selected_embeds = lstm_embeds.masked_select(primary_mask.unsqueeze(-1).bool())
+        primary_embeds = selected_embeds.reshape(lstm_embeds.shape[0], -1, lstm_embeds.shape[2])
+
+        # Select the emebddings at the end of the stimulus response time
+        target_output_idx = torch.tensor(
+            (self.downstream_config['n_stimulus_samples'] / \
+            self.downstream_config['tmax_samples']) \
+            * primary_embeds.shape[1]).ceil().type(torch.int64)
+        target_output_idx = target_output_idx.to(primary_embeds.device)
+        output_embeds = primary_embeds.index_select(dim=1, index=target_output_idx)
+        output_embeds = output_embeds.squeeze(1)
+
+        # Pass the embeddings through the decoder
+        class_logits = self.decoder(output_embeds)
+
+        return class_logits

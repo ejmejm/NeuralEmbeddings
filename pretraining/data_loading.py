@@ -2,7 +2,7 @@ import glob
 import os
 from pathlib import Path
 import pickle
-from typing import List
+from typing import List, Dict, AnyStr
 
 import mne
 import numpy as np
@@ -98,6 +98,44 @@ def correct_all_data(base_path: str, file_type: str = '.fif'):
 
         del raw_data_path
 
+def fit_partial_preprocessors(data_paths: List[AnyStr], config: Dict):
+    """
+    Fit the preprocessors on a sampled subset of the data.
+
+    Args:
+        data_paths: List of paths to the raw data.
+        config: config dictionary.
+    """
+    # Sample some of the data for fitting the preprocessing models
+    n_fit_samples = min(config['preprocess_fit_samples'], len(data_paths))
+    print(f'Using {n_fit_samples} samples for fitting preprocessing models')
+    fit_data_paths = np.random.choice(data_paths, len(data_paths), False)
+
+    print('Loading data for fitting preprocessing models...')
+    fit_samples = []
+    with tqdm(total=n_fit_samples) as bar:
+        sample_idx = 0
+        while len(fit_samples) < n_fit_samples and sample_idx < len(fit_data_paths):
+            # load raw data; skip any bad data (should)
+            try:
+                raw_data = mne.io.read_raw_fif(fit_data_paths[sample_idx],
+                    on_split_missing='raise', preload=True, verbose=False)
+                sample_idx += 1
+
+                if len(raw_data) < config['min_recording_length']:
+                    raise ValueError('Sample too small')
+                    
+                fit_samples.append(raw_data)
+                bar.update(1)
+            except ValueError:
+                warnings.warn('Should not have skipped; check data again')
+                sample_idx += 1
+                continue
+    
+    # Learn the needed preprocessing models
+    print('Fitting preprocessing models...')
+    learn_preprocessors(fit_samples, config)
+
 def preprocess_and_save_data(
     all_raw_data_paths: List[List[str]],
     config: dict,
@@ -130,35 +168,7 @@ def preprocess_and_save_data(
     list_of_data_samples_sizes = list()
 
     if fit_preprocessors:
-        # Sample some of the data for fitting the preprocessing models
-        n_fit_samples = min(config['preprocess_fit_samples'], len(all_data_paths))
-        print(f'Using {n_fit_samples} samples for fitting preprocessing models')
-        fit_data_paths = np.random.choice(all_data_paths, len(all_data_paths), False)
-
-        print('Loading data for fitting preprocessing models...')
-        fit_samples = []
-        with tqdm(total=n_fit_samples) as bar:
-            sample_idx = 0
-            while len(fit_samples) < n_fit_samples and sample_idx < len(fit_data_paths):
-                # load raw data; skip any bad data (should)
-                try:
-                    raw_data = mne.io.read_raw_fif(fit_data_paths[sample_idx],
-                        on_split_missing='raise', preload=True, verbose=False)
-                    sample_idx += 1
-
-                    if len(raw_data) < config['min_recording_length']:
-                        raise ValueError('Sample too small')
-                        
-                    fit_samples.append(raw_data)
-                    bar.update(1)
-                except ValueError:
-                    warnings.warn('Should not have skipped; check data again')
-                    sample_idx += 1
-                    continue
-        
-        # Learn the needed preprocessing models
-        print('Fitting preprocessing models...')
-        learn_preprocessors(fit_samples, config)
+        fit_partial_preprocessors(all_data_paths, config)
 
     print('Preprocessing...')
     n_loaded = 0
@@ -261,14 +271,7 @@ def learn_preprocessors(data: List[mne.io.Raw], config: dict):
     # Standardization
     if config['use_standardization']:
         # Flatten the data for fitting
-        flat_data_batches = []
-        for x in data:
-            df = x.to_data_frame()
-            df.drop(['time'], axis=1, inplace=True)
-            vals = df.values.reshape(-1, 1)
-            flat_data_batches.append(vals)
-        flat_data = np.concatenate(flat_data_batches)
-
+        flat_data = np.concatenate([x.get_data().reshape(-1, 1) for x in data])
         scaler = StandardScaler()
         # Reshape to -1 so all channel samples are scaled together,
         # otherwise each channel would be scaled independently
@@ -340,11 +343,8 @@ def apply_model_based_preprocessing(data: mne.io.Raw, config: dict) -> mne.io.Ra
         # data = ica.apply(data)
         raise NotImplementedError('ICA has been disabled.')
     
-    # 
-    data = data.to_data_frame()
-    data.drop(['time'], axis=1, inplace=True)
-    data = data.values
-
+    data = data.get_data().T
+    
     # Standardization vs. normalization
     if config['use_standardization']:
         scaler = preprocessing_models['scaler']
@@ -490,12 +490,8 @@ def prepare_dataloaders(config):
     return dataloaders
 
 
+### Epoched data preprocessing ###
 
-
-
-
-
-### EPOCHED DATA PREPROCESSING ###
 
 def apply_model_based_preprocessing_epochs(data: mne.io.Raw, config: dict, events: np.ndarray) -> tuple[Tensor, np.ndarray]:
     """
@@ -592,8 +588,8 @@ def get_epoched_data(data: mne.io.Raw, config: dict, events: np.ndarray) -> tupl
     data_events_ids = events[:, 2]
 
     # Create epoched data from (raw) data and events
-    tmin = -config['tmin_samples'] / data.info['sfreq']
-    tmax = config['tmax_samples'] / data.info['sfreq']
+    tmin = -config['downstream']['tmin_samples'] / data.info['sfreq']
+    tmax = config['downstream']['tmax_samples'] / data.info['sfreq']
     epochs = mne.Epochs(data, events, tmin=tmin, tmax=tmax,
                     preload=True, reject=None)
 
@@ -731,15 +727,18 @@ class BatchTensorEpochedDataset(Dataset):
         # (n_channels, sample_size)
         data_run = torch.load(os.path.join(self.load_dir, f'run_{run_num}_epoch_{epoch_num}' + DATA_FILE_ENDING))
 
+        tmin_samples = self.config['downstream']['tmin_samples']
+        tmax_samples = self.config['downstream']['tmax_samples']
         dict_data_run = {
-            'calibration_input': data_run[:, :self.config['tmin_samples']],
-            'primary_input': data_run[:, self.config['tmin_samples']:]
+            'calibration_input': data_run[:, :tmin_samples],
+            'primary_input': data_run[:, tmin_samples:tmin_samples+tmax_samples],
+            'label': torch.LongTensor(self.all_labels[run_num][epoch_num][None])
         }
 
-        return dict_data_run, self.all_labels[run_num][epoch_num]
+        return dict_data_run
 
 
-def prepare_downsteam_dataloaders(config):
+def prepare_downsteam_dataloaders(config, batch_size=1):
     base_dir = os.path.dirname(__file__)
 
     downstream_data_path = os.path.join(base_dir, config['downstream_preprocessed'])
@@ -755,20 +754,20 @@ def prepare_downsteam_dataloaders(config):
             downstream_dataset, [n_train_samples, n_val_samples, n_test_samples])
     else:
         warnings.warn('The training data or training metadata file does not exist. ' +
-                      'Skipping loading of the training data.')
+                      'Skipping loading of the data.')
         train_dataset = None
         val_dataset = None
         test_dataset = None
 
     dataloaders = {
         'train': DataLoader(
-            train_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=2) \
                 if train_dataset is not None and len(train_dataset) > 0 else None,
         'val': DataLoader(
-            val_dataset, shuffle=True, collate_fn=get_first_element, num_workers=2) \
+            val_dataset, batch_size=batch_size, shuffle=True, num_workers=2) \
                 if val_dataset is not None and len(val_dataset) > 0 else None,
         'test': DataLoader(
-            test_dataset,  shuffle=True, collate_fn=get_first_element, num_workers=2) \
+            test_dataset, batch_size=batch_size, shuffle=True, num_workers=2) \
                 if test_dataset is not None and len(test_dataset) > 0 else None
     }
 

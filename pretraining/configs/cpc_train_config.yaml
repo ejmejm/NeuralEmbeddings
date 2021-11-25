@@ -18,11 +18,11 @@ learning_rate: 0.001
 train_method: "CPC"
 
 cpc_params:
-  embedding_dim: 256
   n_pred_steps: 12
   scheduler_enabled: True
 
 ### Model ###
 
 model:
+  lstm_embedding_dim: 256
   save_path: "../models/cpc_model.pt"

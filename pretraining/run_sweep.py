@@ -80,8 +80,7 @@ def run_sweep_iteration(preprocess=True, device=None):
         model_config = config['model']
         model = NeuroSignalEncoder(model_config)
         if config['train_method'].lower() == 'cpc':
-            cpc_config = config['cpc_params']
-            model.add_lstm_head(cpc_config['embedding_dim'])
+            model.add_lstm_head(model_config['lstm_embedding_dim'])
         model = model.to(config['device'])
         wandb.watch(model, log_freq=100)
 

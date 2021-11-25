@@ -135,9 +135,10 @@ def train_with_cpc(
         val_loader: The data loader for validation.
     """
     cpc_config = config['cpc_params']
+    model_config = config['model']
     # Add bilinear layers used for calculating the CPC loss
     bilinear_layers = [
-        nn.Bilinear(config['model']['embedding_dim'], cpc_config['embedding_dim'],
+        nn.Bilinear(model_config['embedding_dim'], model_config['lstm_embedding_dim'],
                     1, bias=False, device=config['device'])
         for _ in range(cpc_config['n_pred_steps'])]
     all_params = list(model.parameters()) + [l.weight for l in bilinear_layers]

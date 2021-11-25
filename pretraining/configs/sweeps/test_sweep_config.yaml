@@ -51,7 +51,6 @@ msm_params:
   phase_decay: 0.1
   
 cpc_params:
-  embedding_dim: 64
   n_pred_steps: 2
   scheduler_enabled: True
 
@@ -114,6 +113,7 @@ model:
   max_primary_input_len: 1024
   max_calibration_input_len: 2048
   embedding_dim: 32
+  lstm_embedding_dim: 64
   channel_combine_func: "mean" # Valid values: [mean, logsumexp]
 
   ### Primary Model ###
