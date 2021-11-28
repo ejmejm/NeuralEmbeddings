@@ -1,0 +1,30 @@
+#############################################
+###                                       ###
+###  NeuralEmbeddings Pretraining Config  ###
+###                                       ###
+#############################################
+
+seed: null
+
+### Weights & Biases Integration ###
+
+wandb_mode: "online" # ["online", "offline", "disabled"]
+
+### Training ###
+
+train_epochs: 3
+learning_rate: 0.001
+epoch_early_cutoff: 0.3
+
+train_method: "CPC"
+
+cpc_params:
+  n_pred_steps: 12
+  scheduler_enabled: True
+
+### Model ###
+
+model:
+  lstm_embedding_dim: 256
+  channel_combine_func: "logsumexp" # Valid values: [mean, logsumexp]
+  save_path: "../models/cpc_model.pt"

@@ -1,0 +1,67 @@
+#############################################
+###                                       ###
+###  NeuralEmbeddings Pretraining Config  ###
+###                                       ###
+#############################################
+
+seed: null
+
+### Weights & Biases Integration ###
+
+wandb_mode: "online" # ["online", "offline", "disabled"]
+
+### Training ###
+
+train_epochs: 3
+learning_rate: 0.001
+# epoch_early_cutoff: 0.3
+
+batch_size: 16 # 64
+log_interval: 128
+val_interval: 512
+
+train_method: "CPC"
+
+cpc_params:
+  n_pred_steps: 12
+  scheduler_enabled: True
+  
+downstream:
+  train_epochs: 5
+  learning_rate: 0.0002
+  
+  batch_size: 16 # 64
+  log_interval: 128
+  val_interval: 1024
+
+  # Number of samples to take before and after the stimulus onset
+  tmin_samples: 200
+  tmax_samples: 600
+
+  use_lstm: False
+
+primary_unit_size: 800
+calibration_unit_size: 0
+
+### Model ###
+
+model_type: 'wav2vec'
+model:
+  lstm_embedding_dim: 256
+  embedding_dim: 128
+  max_primary_input_len: 800 # 600
+  max_calibration_input_len: 0 # 200
+  save_path: null # "../models/w2v_cpc_model.pt"
+
+  wav2vec:
+    # Conv
+    n_convs: 5
+    filter_size: 3
+    stride: 2
+    n_input_channels: 204
+
+    # Transformer
+    n_layers: 1
+    dropout: 0.1
+    n_head: 2 # N heads for the attention
+    feedforward_dim: 64

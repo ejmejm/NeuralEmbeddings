@@ -22,7 +22,7 @@ parser.add_argument('-d', '--downstream', dest='downstream', action='store_true'
                     help='Prepares downstream data when true.')
 parser.add_argument('-nd', '--no_downstream', dest='downstream', action='store_false',
                     help='Prepares downstream data when true.')
-parser.set_defaults(fit=True, pretrain=True, downstream=True)
+parser.set_defaults(fit=False, pretrain=False, downstream=False)
 
 def prepare_data(config, fit=True, transform=True):
     # Load and process the train data

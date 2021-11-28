@@ -103,9 +103,10 @@ test_info: "dataset_info"
 downstream:
   train_epochs: 2
   learning_rate: 0.001
-  batch_size: 4
-  log_interval: 4
-  val_interval: 8
+  batch_size: 16
+  log_interval: 128
+  val_interval: 1024
+  use_lstm: True
 
   # Number of classes for downstream classification
   n_classes: 10
@@ -126,6 +127,7 @@ downstream_dir: "data/downstream_datasets"
 
 ### Model ###
 
+model_type: 'neuro_signal_encoder'
 model:
   save_path: "../models/model.pt"
 
@@ -142,6 +144,7 @@ model:
     enabled: True
 
     # Conv
+    n_convs: 1
     filter_size: 100
     stride: 75
 
@@ -156,6 +159,7 @@ model:
     enabled: True
 
     # Conv (NOT USED unless the single channel module is disabled)
+    n_convs: 1
     filter_size: 100
     stride: 75
 
@@ -172,6 +176,7 @@ model:
     enabled: True
 
     # Conv
+    n_convs: 1
     filter_size: 100
     stride: 75
 

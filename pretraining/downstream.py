@@ -74,19 +74,16 @@ def train_downstream(
     ds_config = config['downstream']
 
     optimizer = optim.Adam(model.parameters(), lr=ds_config['learning_rate'])
+    criterion = nn.CrossEntropyLoss()
 
     # Calculate initial validation loss
-    val_stats = validate(model, val_loader, config)
-    wandb.log({'val_' + k: v for k, v in val_stats.items()})
+    # val_stats = validate(model, val_loader, config)
+    # wandb.log({'val_' + k: v for k, v in val_stats.items()})
 
     n_batches = len(train_loader)
     for epoch in range(ds_config['train_epochs']):
         epoch_losses = []
         epoch_accs = []
-
-        batch_losses = []
-        batch_preds = []
-        batch_labels = []
 
         model.train()
         for batch_idx, data in enumerate(train_loader):
@@ -104,44 +101,31 @@ def train_downstream(
 
             # Update the result buffers
             preds = logits.argmax(dim=1)
-            batch_preds.extend(preds.detach().cpu().numpy())
-            batch_labels.extend(labels.detach().cpu().numpy())
 
             # Calculate the loss and update the model weights
-            loss = F.cross_entropy(logits, labels)
-            batch_losses.append(loss)
+            probs = F.softmax(logits, dim=1)
+            loss = criterion(probs, labels)
 
-            # Minibatch update because samples can only be passed
-            # through the decoder one at a time (current limitation)
-            if (batch_idx + 1) % ds_config['batch_size'] == 0 or \
-               batch_idx == n_batches - 1:
-                batch_loss = torch.mean(torch.stack(batch_losses))
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-                optimizer.zero_grad()
-                batch_loss.backward()
-                optimizer.step()
+            # Calculate accuracy
+            accuracy = (torch.sum(preds == labels) \
+                / len(labels)).item()
 
-                # Calculate accuracy
-                accuracy = np.sum(np.array(batch_preds) == np.array(batch_labels)) \
-                    / len(batch_labels)
-                batch_loss = batch_loss.item()
+            # Log updates to Wandb
+            wandb.log({
+                'epoch': epoch,
+                'lr': optimizer.param_groups[0]['lr'],
+                'loss': loss,
+                'accuracy': accuracy})
 
-                # Log updates to Wandb
-                wandb.log({
-                    'epoch': epoch,
-                    'lr': optimizer.param_groups[0]['lr'],
-                    'loss': batch_loss,
-                    'accuracy': accuracy})
-
-                epoch_losses.append(batch_loss)
-                epoch_accs.append(accuracy)
-
-                batch_preds = []
-                batch_labels = []
-                batch_losses = []
+            epoch_losses.append(loss.item())
+            epoch_accs.append(accuracy)
 
             # Log the epoch, batch, and loss
-            if (batch_idx + 1) % (ds_config['batch_size'] * ds_config['log_interval']) == 0 or \
+            if (batch_idx + 1) % ds_config['log_interval'] == 0 or \
                (batch_idx + 1) == n_batches:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
                     epoch + 1, batch_idx + 1, n_batches,
@@ -154,7 +138,7 @@ def train_downstream(
             # and every `ds_config['val_interval']` batches
             do_validation = val_loader is not None and \
                     (ds_config['val_interval'] is not None and \
-                    (batch_idx + 1) % (ds_config['batch_size'] * ds_config['val_interval']) == 0) or \
+                    (batch_idx + 1) % ds_config['val_interval'] == 0) or \
                     (batch_idx + 1) == n_batches
             if do_validation:
                 val_stats = validate(model, val_loader, config)

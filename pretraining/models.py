@@ -79,6 +79,7 @@ class Wav2Vec(nn.Module):
         input_channels: int = 1,
         embedding_dim: int = 64,
         embed_reduc_factor: int = 2, # Factor to reduce the input size by
+        n_convs: int = 1,
         conv_width: int = 3,
         n_layers: int = 6,
         dropout: float = 0.5,
@@ -101,21 +102,38 @@ class Wav2Vec(nn.Module):
         self.include_transformer = include_transformer
 
         # Initialize the layers
-        if include_conv:
+        if include_conv and n_convs > 0:
             conv_padding = (conv_width - 1) // 2
             conv_stride = embed_reduc_factor
 
             # Length of embedding sequences, which is calculated based on
             # the maximum input size of the model + the convolutional params
-            self.embed_seq_len = int(np.floor((input_dim + 2 * conv_padding - (conv_width - 1) - 1) \
-                / conv_stride + 1))
+            self.embed_seq_len = input_dim
+            for _ in range(n_convs):
+                self.embed_seq_len = int(np.floor((self.embed_seq_len + 2 * conv_padding - (conv_width - 1) - 1) \
+                    / conv_stride + 1))
 
-            self.conv = nn.Conv1d(
+            # Create the conv layers
+            self.convs = []
+            first_conv = nn.Conv1d(
                 in_channels = self.input_channels,
                 out_channels = embedding_dim,
                 kernel_size = conv_width,
                 padding = conv_padding,
                 stride = conv_stride)
+            self.convs.append(first_conv)
+            self.convs.append(nn.ReLU())
+            for _ in range(1, n_convs):
+                conv = nn.Conv1d(
+                    in_channels = embedding_dim,
+                    out_channels = embedding_dim,
+                    kernel_size = conv_width,
+                    padding = conv_padding,
+                    stride = conv_stride)
+                self.convs.append(conv)
+                self.convs.append(nn.ReLU())
+
+            self.convs = nn.Sequential(*self.convs)
         else:
             self.embed_seq_len = self.input_dim
             self.embedding_dim = self.input_channels
@@ -139,8 +157,47 @@ class Wav2Vec(nn.Module):
             # TODO: Try addinng a normalization layer as a param to the transformer
             self.encoder = nn.TransformerEncoder(transformer_layer, n_layers)
 
+        self.lstm_head = None
+
+    def from_config(config):
+        """
+        Initializes a wav2vec model from a config dict.
+        This should only be used when the main model is a wav2vec one.
+        """
+        w2v_config = config['wav2vec']
+        model = Wav2Vec(
+            input_dim = config['max_primary_input_len'] + \
+                config['max_calibration_input_len'],
+            embedding_dim = config['embedding_dim'],
+            input_channels = w2v_config['n_input_channels'],
+            embed_reduc_factor = w2v_config['stride'],
+            n_convs = w2v_config['n_convs'],
+            conv_width = w2v_config['filter_size'],
+            n_layers = w2v_config['n_layers'],
+            dropout = w2v_config['dropout'],
+            n_head = w2v_config['n_head'],
+            feedforward_dim = w2v_config['feedforward_dim'],
+            include_conv = True,
+            include_transformer = True)
+        return model
+
     def get_device(self):
         return next(self.parameters()).device
+
+    def add_lstm_head(self, output_dim: int) -> None:
+        """
+        Add an LSTM head to the model.
+        This is required for CPC, and optional when
+        training downstream tasks.
+
+        Args:
+            output_dim: dimension of the LSTM head output.
+        """
+        self.lstm_head = nn.LSTM(
+            input_size = self.embedding_dim,
+            hidden_size = output_dim,
+            num_layers = 1,
+            batch_first = True)
     
     def forward(self, x: Tensor, sm_mask: Optional[Tensor] = None,
         embed_hook: Callable[[Tensor], Tensor] = None) -> Tensor:
@@ -162,7 +219,7 @@ class Wav2Vec(nn.Module):
         
         if self.include_conv:
             x = x.transpose(1, 2)
-            x = self.conv(x)
+            x = self.convs(x)
             x = x.transpose(1, 2)
 
         if embed_hook is not None:
@@ -183,9 +240,22 @@ class Wav2Vec(nn.Module):
 
             x = self.encoder(x) # Mask could go here
 
+        ### LSTM head ###
+
+        if self.lstm_head is not None:
+            # Run the embeddings through the LSTM head
+            lstm_embeds, lstm_hidden = self.lstm_head(x)
+        else:
+            lstm_embeds = None
+            lstm_hidden = None
+
+        ### Returns ###
+
         return {
             'embeddings': x,
-            'targets': targets
+            'targets': targets,
+            'lstm_embeddings': lstm_embeds,
+            'lstm_hidden': lstm_hidden,
         }
 
 def apply_channel_combine_func(func_str, data):
@@ -216,6 +286,7 @@ class NeuroSignalEncoder(nn.Module):
                 input_dim = config['max_calibration_input_len'],
                 embedding_dim = config['embedding_dim'],
                 embed_reduc_factor = calib_config['stride'],
+                n_convs = calib_config['n_convs'],
                 conv_width = calib_config['filter_size'],
                 n_layers = calib_config['n_layers'],
                 dropout = calib_config['dropout'],
@@ -248,6 +319,7 @@ class NeuroSignalEncoder(nn.Module):
                 input_dim = adjusted_input_dim,
                 embedding_dim = config['embedding_dim'],
                 embed_reduc_factor = sc_config['stride'],
+                n_convs = sc_config['n_convs'],
                 conv_width = sc_config['filter_size'],
                 n_layers = sc_config['n_layers'],
                 dropout = sc_config['dropout'],
@@ -273,6 +345,7 @@ class NeuroSignalEncoder(nn.Module):
                 input_channels = input_channels,
                 embedding_dim = config['embedding_dim'],
                 embed_reduc_factor = mc_config['stride'],
+                n_convs = mc_config['n_convs'],
                 conv_width = mc_config['filter_size'],
                 n_layers = mc_config['n_layers'],
                 dropout = mc_config['dropout'],
@@ -572,28 +645,47 @@ class NeuroDecoder(nn.Module):
         super().__init__()
         self.config = config
         self.model_config = config['model']
-        self.downstream_config = config['downstream']
+        self.ds_config = config['downstream']
 
         # Load the encoder model if necessary
         if encoder is None:
-            self.encoder = NeuroSignalEncoder(self.model_config)
+            self.encoder = init_model(config)
             
             # Add LSTM layer to model before loading weights if CPC was used
             if self.config['train_method'].lower() == 'cpc':
                 self.encoder.add_lstm_head(self.model_config['lstm_embedding_dim'])
-                self.encoder.load_state_dict(torch.load(self.model_config['save_path']))
+                if self.model_config['save_path'] is not None:
+                    print('Loading the pretrained model for downstream finetuning.')
+                    self.encoder.load_state_dict(torch.load(self.model_config['save_path']))
             else:
                 # MSM was not trained with the LSTM head, so it should be added after
                 # the weights for the rest of the model are loaded
-                self.encoder.load_state_dict(torch.load(self.model_config['save_path']))
+                if self.model_config['save_path'] is not None:
+                    print('Loading the pretrained model for downstream finetuning.')
+                    self.encoder.load_state_dict(torch.load(self.model_config['save_path']))
                 self.encoder.add_lstm_head(self.model_config['lstm_embedding_dim'])
         else:
             self.encoder = encoder
             
-        self.decoder = nn.Sequential(
-            nn.Linear(self.model_config['lstm_embedding_dim'], 128),
-            nn.ReLU(),
-            nn.Linear(128, self.downstream_config['n_classes']))
+        if self.ds_config['use_lstm']:
+            input_size = self.model_config['lstm_embedding_dim']
+            self.decoder = nn.Sequential(
+                nn.Linear(input_size, 512),
+                nn.ReLU(),
+                nn.Linear(512, 256),
+                nn.ReLU(),
+                nn.Linear(256, self.ds_config['n_classes']))
+        else:
+            input_size = self.encoder.embed_seq_len * self.encoder.embedding_dim
+            self.decoder = nn.Sequential(
+                nn.Linear(input_size, 1024),
+                nn.ReLU(),
+                nn.Linear(1024, 512),
+                nn.ReLU(),
+                nn.Linear(512, 256),
+                nn.ReLU(),
+                nn.Linear(256, self.ds_config['n_classes']))
+
 
     def forward(self,
                 primary_input: Tensor,
@@ -610,25 +702,51 @@ class NeuroDecoder(nn.Module):
             Tensor of shape (batch_size, n_classes)
         """
         # Pass the input signals through the encoder
-        output_dict = self.encoder(primary_input, calibration_input=calibration_input)
+        if isinstance(self.encoder, NeuroSignalEncoder):
+            if not self.ds_config['use_lstm']:
+                raise NotImplementedError('Non-LSTM decoder for NeuroSignalEncoder is not implemented yet.')
 
-        lstm_embeds = output_dict['lstm_embeddings'] # Sequence of all hidden outputs
-        primary_mask = output_dict['primary_embeddings_mask']
+            output_dict = self.encoder(primary_input, calibration_input=calibration_input)
 
-        # Select the embeddings corresponding to the primary sequence
-        selected_embeds = lstm_embeds.masked_select(primary_mask.unsqueeze(-1).bool())
-        primary_embeds = selected_embeds.reshape(lstm_embeds.shape[0], -1, lstm_embeds.shape[2])
+            lstm_embeds = output_dict['lstm_embeddings'] # Sequence of all hidden outputs
+            primary_mask = output_dict['primary_embeddings_mask']
 
-        # Select the emebddings at the end of the stimulus response time
-        target_output_idx = torch.tensor(
-            (self.downstream_config['n_stimulus_samples'] / \
-            self.downstream_config['tmax_samples']) \
-            * primary_embeds.shape[1]).ceil().type(torch.int64)
-        target_output_idx = target_output_idx.to(primary_embeds.device)
-        output_embeds = primary_embeds.index_select(dim=1, index=target_output_idx)
-        output_embeds = output_embeds.squeeze(1)
+            # Select the embeddings corresponding to the primary sequence
+            selected_embeds = lstm_embeds.masked_select(primary_mask.unsqueeze(-1).bool())
+            primary_embeds = selected_embeds.reshape(lstm_embeds.shape[0], -1, lstm_embeds.shape[2])
+
+            # Select the emebddings at the end of the stimulus response time
+            target_output_idx = torch.tensor(
+                (self.ds_config['n_stimulus_samples'] / \
+                self.ds_config['tmax_samples']) \
+                * primary_embeds.shape[1]).ceil().type(torch.int64)
+            target_output_idx = target_output_idx.to(primary_embeds.device)
+            output_embeds = primary_embeds.index_select(dim=1, index=target_output_idx)
+            output_embeds = output_embeds.squeeze(1)
+        else:
+            if calibration_input is not None:
+                primary_input = torch.cat((calibration_input, primary_input), dim=1)
+            output_dict = self.encoder(primary_input)
+            
+            if self.ds_config['use_lstm']:
+                output_embeds = output_dict['lstm_hidden'][0].squeeze(0)
+            else:
+                output_embeds = output_dict['embeddings']
+                output_embeds = output_embeds.reshape(output_embeds.shape[0], -1)
 
         # Pass the embeddings through the decoder
         class_logits = self.decoder(output_embeds)
 
         return class_logits
+
+def init_model(config: dict) -> nn.Module:
+    """
+    Initialize a model based on the model type set in the config.
+    """
+    model_config = config['model']
+    if config['model_type'] == 'neuro_signal_encoder':
+        return NeuroSignalEncoder(model_config)
+    elif config['model_type'] == 'wav2vec':
+        return Wav2Vec.from_config(model_config)
+    else:
+        raise ValueError('Unknown model type: {}'.format(config['model_type']))

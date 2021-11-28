@@ -7,7 +7,7 @@ from torch import nn, optim, Tensor
 from torch.utils.data import DataLoader
 import wandb
 
-from models import NeuroSignalEncoder
+from models import NeuroSignalEncoder, Wav2Vec
 
 
 def calculate_cpc_loss(
@@ -30,15 +30,16 @@ def calculate_cpc_loss(
     out_embeds = output_dict['embeddings']
     lstm_hiddens = output_dict['lstm_embeddings']
 
-    primary_embeds_mask = output_dict['primary_embeddings_mask']
-    primary_embeds_mask = primary_embeds_mask.bool().unsqueeze(-1)
+    if 'primary_embeddings_mask' in output_dict:
+        primary_embeds_mask = output_dict['primary_embeddings_mask']
+        primary_embeds_mask = primary_embeds_mask.bool().unsqueeze(-1)
 
-    selected_out_embeds = out_embeds.masked_select(primary_embeds_mask)
-    # This will break if different primary seq lengths are used within the same batch
-    out_embeds = selected_out_embeds.reshape(out_embeds.shape[0], -1, out_embeds.shape[2])
+        selected_out_embeds = out_embeds.masked_select(primary_embeds_mask)
+        # This will break if different primary seq lengths are used within the same batch
+        out_embeds = selected_out_embeds.reshape(out_embeds.shape[0], -1, out_embeds.shape[2])
 
-    selected_lstm_hiddens = lstm_hiddens.masked_select(primary_embeds_mask)
-    lstm_hiddens = selected_lstm_hiddens.reshape(lstm_hiddens.shape[0], -1, lstm_hiddens.shape[2])
+        selected_lstm_hiddens = lstm_hiddens.masked_select(primary_embeds_mask)
+        lstm_hiddens = selected_lstm_hiddens.reshape(lstm_hiddens.shape[0], -1, lstm_hiddens.shape[2])
 
     seq_len = out_embeds.shape[1]
     n_pred_steps = len(bilinear_layers)
@@ -149,8 +150,8 @@ def train_with_cpc(
             optimizer, mode='min')
 
     # Calculate initial validation loss
-    val_losses = validate(model, bilinear_layers, val_loader, config)
-    log_losses(val_losses, prefix='val_')
+    # val_losses = validate(model, bilinear_layers, val_loader, config)
+    # log_losses(val_losses, prefix='val_')
 
     n_batches = len(train_loader)
     if 'epoch_early_cutoff' in config and \
@@ -167,7 +168,7 @@ def train_with_cpc(
             
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
-            if model.calibration_model is not None:
+            if isinstance(model, NeuroSignalEncoder) and model.calibration_model is not None:
                 calib_input = data['calibration_input'].to(config['device'])
             else:
                 calib_input = None
@@ -175,16 +176,17 @@ def train_with_cpc(
             # Shuffle the primary input
             if config['shuffle_in_batch']:
                 primary_input = primary_input[torch.randperm(primary_input.shape[0])]
-
             # Run model
-            output_dict = model(primary_input, calibration_input=calib_input)
+            if isinstance(model, NeuroSignalEncoder):
+                output_dict = model(primary_input, calibration_input=calib_input)
+            else:
+                output_dict = model(primary_input)
 
             # Calculate the masked sequence modeling losses
             cpc_losses = calculate_cpc_loss(output_dict, bilinear_layers,
                 cpc_config['mi_seq_radius'])
             cpc_loss = torch.sum(cpc_losses)
             batch_losses.append(cpc_loss.item())
-
             # Log epoch
             wandb.log({'epoch': epoch})
             # Log learning rates
@@ -241,13 +243,16 @@ def validate(model: NeuroSignalEncoder, bilinear_layers: List[nn.Module],
         for data in val_loader:
             # Unpack training data
             primary_input = data['primary_input'].to(config['device'])
-            if model.calibration_model is not None:
+            if isinstance(model, NeuroSignalEncoder) and model.calibration_model is not None:
                 calib_input = data['calibration_input'].to(config['device'])
             else:
                 calib_input = None
 
             # Run model
-            output_dict = model(primary_input, calibration_input=calib_input)
+            if isinstance(model, NeuroSignalEncoder):
+                output_dict = model(primary_input, calibration_input=calib_input)
+            else:
+                output_dict = model(primary_input)
 
             # Calculate the masked sequence modeling losses
             cpc_losses = calculate_cpc_loss(output_dict, bilinear_layers,

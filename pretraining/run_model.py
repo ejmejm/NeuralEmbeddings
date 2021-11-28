@@ -8,7 +8,7 @@ import wandb
 
 from config_handling import prepare_config, to_wandb_format
 from data_loading import prepare_dataloaders, prepare_downsteam_dataloaders
-from models import NeuroSignalEncoder, NeuroDecoder
+from models import NeuroSignalEncoder, NeuroDecoder, Wav2Vec, init_model
 from downstream import train_downstream
 from training.msm import train_with_msm
 from training.cpc import train_with_cpc
@@ -28,11 +28,10 @@ parser.add_argument('-d', '--downstream', dest='downstream', action='store_true'
                     help='Performs downstream training when set to true.')
 parser.add_argument('-nd', '--no_downstream', dest='downstream', action='store_false',
                     help='Performs downstream training when set to true.')
-parser.set_defaults(gen_data=False, pretrain=True, downstream=True)
+parser.set_defaults(gen_data=False, pretrain=False, downstream=False)
 
 
 ### Main Functions ###
-
 
 def pretrain(config: dict, group: Optional[str] = None):
     """
@@ -61,15 +60,17 @@ def pretrain(config: dict, group: Optional[str] = None):
     val_loader = dataloaders['val']
 
     # Create the model
-    model_config = config['model']
-    model = NeuroSignalEncoder(model_config)
+    model = init_model(config)
+
     # Add an LSTM head if CPC is being used
+    model_config = config['model']
     if config['train_method'].lower() == 'cpc':
         model.add_lstm_head(model_config['lstm_embedding_dim'])
     model = model.to(config['device'])
     wandb.watch(model, log_freq=100)
 
     # Train the model
+    print('Startin training...')
     if config['train_method'].lower() == 'msm':
         train_with_msm(model, config, train_loader, val_loader)
     elif config['train_method'].lower() == 'cpc':
@@ -85,7 +86,6 @@ def pretrain(config: dict, group: Optional[str] = None):
         torch.save(model.state_dict(), save_path)
 
     wandb.finish()
-
 
 def run_downstream(config: dict, group: Optional[str] = None):
     """
@@ -109,13 +109,13 @@ def run_downstream(config: dict, group: Optional[str] = None):
     print('seed:', config['seed'])
 
     # Prepare the data
-    dataloaders = prepare_downsteam_dataloaders(config, 1)
+    dataloaders = prepare_downsteam_dataloaders(config, config['downstream']['batch_size'])
     train_loader = dataloaders['train']
     val_loader = dataloaders['val']
     test_loader = dataloaders['test']
 
     # Create the model
-    model = NeuroDecoder(config)
+    model = NeuroDecoder(config) # TestModel()
     model = model.to(config['device'])
     wandb.watch(model, log_freq=100)
 
