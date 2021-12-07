@@ -133,14 +133,15 @@ class Wav2Vec(nn.Module):
                 self.convs.append(conv)
                 self.convs.append(nn.ReLU())
 
+            self.convs.append(nn.Dropout(p=dropout))
             self.convs = nn.Sequential(*self.convs)
         else:
             self.embed_seq_len = self.input_dim
             self.embedding_dim = self.input_channels
 
         # Initialize the positional encoding layer
-        self.pos_enc = PositionalEncoding(
-            embedding_dim, 0.25 * dropout, self.embed_seq_len)
+        # self.pos_enc = PositionalEncoding(
+        #     embedding_dim, 0.25 * dropout, self.embed_seq_len)
 
         # Reference for understanding how this works:
         # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
@@ -165,6 +166,12 @@ class Wav2Vec(nn.Module):
         This should only be used when the main model is a wav2vec one.
         """
         w2v_config = config['wav2vec']
+        if 'transformer_enabled' not in w2v_config or \
+           w2v_config['transformer_enabled'] is None:
+            transformer_enabled = True
+        else:
+            transformer_enabled = w2v_config['transformer_enabled']
+
         model = Wav2Vec(
             input_dim = config['max_primary_input_len'] + \
                 config['max_calibration_input_len'],
@@ -178,7 +185,7 @@ class Wav2Vec(nn.Module):
             n_head = w2v_config['n_head'],
             feedforward_dim = w2v_config['feedforward_dim'],
             include_conv = True,
-            include_transformer = True)
+            include_transformer = transformer_enabled)
         return model
 
     def get_device(self):
@@ -236,7 +243,7 @@ class Wav2Vec(nn.Module):
 
             # TODO: Double check positional encodings are working correctly and applied in correct place
             # Update: I think I fixed the issue, but I haven't tested extensively yet
-            x = self.pos_enc(x)
+            # x = self.pos_enc(x)
 
             x = self.encoder(x) # Mask could go here
 
@@ -273,6 +280,7 @@ class NeuroSignalEncoder(nn.Module):
         calib_config = config['calibration_module']
         sc_config = config['single_channel_module']
         mc_config = config['mixed_channel_module']
+        self.embedding_dim = config['embedding_dim']
 
         # Config validation
         assert sc_config['enabled'] or mc_config['enabled'], \
@@ -703,26 +711,27 @@ class NeuroDecoder(nn.Module):
         """
         # Pass the input signals through the encoder
         if isinstance(self.encoder, NeuroSignalEncoder):
-            if not self.ds_config['use_lstm']:
-                raise NotImplementedError('Non-LSTM decoder for NeuroSignalEncoder is not implemented yet.')
-
             output_dict = self.encoder(primary_input, calibration_input=calibration_input)
 
-            lstm_embeds = output_dict['lstm_embeddings'] # Sequence of all hidden outputs
-            primary_mask = output_dict['primary_embeddings_mask']
+            if not self.ds_config['use_lstm']:
+                output_embeds = output_dict['embeddings']
+                output_embeds = output_embeds.reshape(output_embeds.shape[0], -1)
+            else:
+                lstm_embeds = output_dict['lstm_embeddings'] # Sequence of all hidden outputs
+                primary_mask = output_dict['primary_embeddings_mask']
 
-            # Select the embeddings corresponding to the primary sequence
-            selected_embeds = lstm_embeds.masked_select(primary_mask.unsqueeze(-1).bool())
-            primary_embeds = selected_embeds.reshape(lstm_embeds.shape[0], -1, lstm_embeds.shape[2])
+                # Select the embeddings corresponding to the primary sequence
+                selected_embeds = lstm_embeds.masked_select(primary_mask.unsqueeze(-1).bool())
+                primary_embeds = selected_embeds.reshape(lstm_embeds.shape[0], -1, lstm_embeds.shape[2])
 
-            # Select the emebddings at the end of the stimulus response time
-            target_output_idx = torch.tensor(
-                (self.ds_config['n_stimulus_samples'] / \
-                self.ds_config['tmax_samples']) \
-                * primary_embeds.shape[1]).ceil().type(torch.int64)
-            target_output_idx = target_output_idx.to(primary_embeds.device)
-            output_embeds = primary_embeds.index_select(dim=1, index=target_output_idx)
-            output_embeds = output_embeds.squeeze(1)
+                # Select the emebddings at the end of the stimulus response time
+                target_output_idx = torch.tensor(
+                    (self.ds_config['n_stimulus_samples'] / \
+                    self.ds_config['tmax_samples']) \
+                    * primary_embeds.shape[1]).ceil().type(torch.int64)
+                target_output_idx = target_output_idx.to(primary_embeds.device)
+                output_embeds = primary_embeds.index_select(dim=1, index=target_output_idx)
+                output_embeds = output_embeds.squeeze(1)
         else:
             if calibration_input is not None:
                 primary_input = torch.cat((calibration_input, primary_input), dim=1)

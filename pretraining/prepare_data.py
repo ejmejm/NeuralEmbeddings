@@ -70,7 +70,7 @@ def prepare_downstream_data(config):
     # Need to pass in a list of events 
     # (for colors dataset we have are looking for events with id = 1, 2, ..., 10)
     # TODO: This shouldn't be hardcoded
-    preprocess_and_save_epoched_data(downstream_data, config, output_dir, label_fn, include_events_list=list(range(1, 11)))
+    preprocess_and_save_epoched_data(downstream_data, config, output_dir, label_fn, include_events_list=list(range(1, 9)))
 
 
 if __name__ == '__main__':

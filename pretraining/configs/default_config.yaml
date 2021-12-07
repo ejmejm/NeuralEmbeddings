@@ -109,7 +109,7 @@ downstream:
   use_lstm: True
 
   # Number of classes for downstream classification
-  n_classes: 10
+  n_classes: 8
 
   # Number of samples to take before and after the stimulus onset
   tmin_samples: 5000

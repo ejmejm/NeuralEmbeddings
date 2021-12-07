@@ -22,15 +22,24 @@ val_interval: 512
 
 train_method: "CPC"
 
+# Directories
+train_dir: "data/sp_train_datasets"
+downstream_dir: "data/sp_downstream_datasets"
+
+train_val_preprocessed: "data/sp_train_preprocessed"
+downstream_preprocessed: "data/sp_downstream_preprocessed"
+
+preprocessed_model_path: "../models/sp_main_preprocessors.pkl"
+
 cpc_params:
   n_pred_steps: 12
   scheduler_enabled: True
   
 downstream:
-  train_epochs: 23
+  train_epochs: 10
   learning_rate: 0.00005
   
-  batch_size: 64 # 64
+  batch_size: 32 # 64
   log_interval: 128
   val_interval: 1024
 
@@ -51,7 +60,7 @@ model:
   embedding_dim: 128
   max_primary_input_len: 800 # 600
   max_calibration_input_len: 0 # 200
-  save_path: "../models/w2v_cpc_model.pt"
+  save_path: null # "../models/sp_w2v_cpc_model.pt"
 
   wav2vec:
     # Conv

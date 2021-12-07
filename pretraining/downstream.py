@@ -54,6 +54,17 @@ def format_labels(labels: Tensor, config: Dict) -> Tensor:
     labels = labels.to(config['device'])
     return labels
 
+def remove_classes(primary_input, calibration_input, labels, classes=[9, 10]):
+    conditions = [labels != c for c in classes]
+    conditions = torch.stack(conditions)
+    selecions = conditions.sum(dim=0).squeeze(1) == len(classes)
+    primary_input = primary_input[selecions]
+    if calibration_input is not None:
+        calibration_input = calibration_input[selecions]
+    labels = labels[selecions]
+    return primary_input, calibration_input, labels
+
+
 def train_downstream(
     model: nn.Module,
     config: dict,
@@ -87,11 +98,16 @@ def train_downstream(
 
         model.train()
         for batch_idx, data in enumerate(train_loader):
+            if batch_idx >= n_batches:
+                print('Stopping epoch early')
+                break
             # Get and format the data for the batch
             primary_input = data['primary_input']
             calibration_input = data['calibration_input']
             labels = data['label']
 
+            primary_input, calibration_input, labels = remove_classes(
+                primary_input, calibration_input, labels, classes=[9, 10])
             primary_input, calibration_input = format_inputs(
                 (primary_input, calibration_input), config)
             labels = format_labels(labels, config)
@@ -99,18 +115,15 @@ def train_downstream(
             # Run the data through the model
             logits = model(primary_input, calibration_input)
 
-            # Update the result buffers
-            preds = logits.argmax(dim=1)
-
             # Calculate the loss and update the model weights
-            probs = F.softmax(logits, dim=1)
-            loss = criterion(probs, labels)
+            loss = criterion(logits, labels)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             # Calculate accuracy
+            preds = logits.argmax(dim=1)
             accuracy = (torch.sum(preds == labels) \
                 / len(labels)).item()
 
@@ -118,7 +131,7 @@ def train_downstream(
             wandb.log({
                 'epoch': epoch,
                 'lr': optimizer.param_groups[0]['lr'],
-                'loss': loss,
+                'loss': loss.item(),
                 'accuracy': accuracy})
 
             epoch_losses.append(loss.item())

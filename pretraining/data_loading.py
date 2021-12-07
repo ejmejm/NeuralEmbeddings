@@ -761,13 +761,13 @@ def prepare_downsteam_dataloaders(config, batch_size=1):
 
     dataloaders = {
         'train': DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=2) \
+            train_dataset, batch_size=batch_size, shuffle=False, num_workers=2) \
                 if train_dataset is not None and len(train_dataset) > 0 else None,
         'val': DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=True, num_workers=2) \
+            val_dataset, batch_size=batch_size, shuffle=False, num_workers=2) \
                 if val_dataset is not None and len(val_dataset) > 0 else None,
         'test': DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=True, num_workers=2) \
+            test_dataset, batch_size=batch_size, shuffle=False, num_workers=2) \
                 if test_dataset is not None and len(test_dataset) > 0 else None
     }
 
@@ -790,6 +790,6 @@ def prepare_downstream_data(config):
     downstream_data = load_raw_data(downstream_dir, file_type)
 
     # Need to pass in a list of events 
-    preprocess_and_save_epoched_data(downstream_data, config, output_dir, label_fn, include_events_list=list(range(1, 11)))
+    preprocess_and_save_epoched_data(downstream_data, config, output_dir, label_fn, include_events_list=list(range(1, 9)))
 
 

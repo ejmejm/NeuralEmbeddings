@@ -87,6 +87,27 @@ def pretrain(config: dict, group: Optional[str] = None):
 
     wandb.finish()
 
+from torch import nn
+class LinearModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc_layers = nn.Sequential(
+            nn.Linear(800*204, 1000),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(1000, 500),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(500, 500),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(500, 8))
+
+    def forward(self, x, y):
+        x = torch.cat((y[:, -200:], x[:, :600]), axis=1)
+        x = x.reshape(x.shape[0], -1)
+        return self.fc_layers(x)
+
 def run_downstream(config: dict, group: Optional[str] = None):
     """
     Train the model on a downstream task.

@@ -12,9 +12,9 @@ wandb_mode: "online" # ["online", "offline", "disabled"]
 
 ### Training ###
 
-train_epochs: 1
+train_epochs: 3
 learning_rate: 0.001
-# epoch_early_cutoff: 0.3
+epoch_early_cutoff: 0.5
 
 batch_size: 16 # 64
 log_interval: 128
@@ -51,7 +51,7 @@ model:
   embedding_dim: 128
   max_primary_input_len: 800 # 600
   max_calibration_input_len: 0 # 200
-  save_path: "../models/w2v_cpc_model.pt"
+  save_path: null # "../models/w2v_cpc_model.pt"
 
   wav2vec:
     # Conv

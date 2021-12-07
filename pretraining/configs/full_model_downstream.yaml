@@ -12,9 +12,9 @@ wandb_mode: "online" # ["online", "offline", "disabled"]
 
 ### Training ###
 
-train_epochs: 1
+train_epochs: 3
 learning_rate: 0.001
-# epoch_early_cutoff: 0.3
+epoch_early_cutoff: 0.5
 
 batch_size: 16 # 64
 log_interval: 128
@@ -45,23 +45,10 @@ calibration_unit_size: 0
 
 ### Model ###
 
-model_type: 'wav2vec'
+model_type: 'neuro_signal_encoder'
 model:
   lstm_embedding_dim: 256
   embedding_dim: 128
   max_primary_input_len: 800 # 600
   max_calibration_input_len: 0 # 200
-  save_path: "../models/w2v_cpc_model.pt"
-
-  wav2vec:
-    # Conv
-    n_convs: 5
-    filter_size: 3
-    stride: 2
-    n_input_channels: 204
-
-    # Transformer
-    n_layers: 2
-    dropout: 0.3
-    n_head: 4 # N heads for the attention
-    feedforward_dim: 64
+  save_path: null # "../models/w2v_cpc_model.pt"

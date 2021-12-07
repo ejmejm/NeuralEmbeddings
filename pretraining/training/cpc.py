@@ -1,17 +1,17 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from einops import rearrange
 import numpy as np
 import torch
+from torch.nn import functional as F
 from torch import nn, optim, Tensor
 from torch.utils.data import DataLoader
 import wandb
 
 from models import NeuroSignalEncoder, Wav2Vec
 
-
 def calculate_cpc_loss(
-    output_dict: dict[str, Tensor],
+    output_dict: Dict[str, Tensor],
     bilinear_layers: List[nn.Module],
     mi_seq_radius: Optional[int] = None) -> float:
     """
@@ -77,12 +77,16 @@ def calculate_cpc_loss(
             # Recover the sequences
             mis = rearrange(mis, '(b s) 1 -> b s',
                 b=out_embeds.shape[0], s=mod_seq_len)
-
             # Calculate the losses
-            mis = torch.exp(mis)
+            # mis = F.normalize(mis, dim=1)
+            mis = torch.exp(mis) + 1e-7
+            mis = torch.clamp(mis, max=100)
             positive_samples = mis[:, (seq_idx - seq_start_idx) + pred_step + 1]
             seq_sums = torch.sum(mis, dim=1)
-            losses = -torch.log(positive_samples / seq_sums)
+            # Clamp to avoid inf
+            
+            losses = positive_samples / seq_sums
+            losses = torch.clamp(-torch.log(losses), -50, 50)
             cpc_losses[pred_step].extend(losses)
 
         if seq_len - seq_idx - 1 < n_pred_steps:
@@ -147,11 +151,11 @@ def train_with_cpc(
     # Create lr scheduler
     if cpc_config['scheduler_enabled']:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min')
+            optimizer, mode='min', patience=4)
 
     # Calculate initial validation loss
-    # val_losses = validate(model, bilinear_layers, val_loader, config)
-    # log_losses(val_losses, prefix='val_')
+    val_losses = validate(model, bilinear_layers, val_loader, config)
+    log_losses(val_losses, prefix='val_')
 
     n_batches = len(train_loader)
     if 'epoch_early_cutoff' in config and \
@@ -193,11 +197,12 @@ def train_with_cpc(
             wandb.log({'lr': optimizer.param_groups[0]['lr']})
             # Log losses
             log_losses(cpc_losses.detach().cpu().numpy(), do_print=False)
-
+    
             # Calcualte losses and update weights
             optimizer.zero_grad()
             cpc_loss.backward()
             optimizer.step()
+
 
             # Log the epoch, batch, and loss
             if (batch_idx + 1) % config['log_interval'] == 0 or \
